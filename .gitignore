@@ -62,3 +62,4 @@ Thumbs.db
 
 # Claude
 .claude/plans/
+secret.txt
