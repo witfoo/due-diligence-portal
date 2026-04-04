@@ -1,6 +1,13 @@
 <script lang="ts">
-	// Dashboard / Landing page
-	// Redirects to /login if not authenticated, /documents if authenticated.
+	import { api } from '$api/client';
+
+	// If user has a token, redirect to documents. Otherwise show landing.
+	$effect(() => {
+		const token = api.getToken();
+		if (token) {
+			window.location.href = '/documents';
+		}
+	});
 </script>
 
 <main>
