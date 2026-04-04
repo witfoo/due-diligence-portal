@@ -69,8 +69,16 @@ func main() {
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 	e.Use(middleware.SecurityHeaders())
-	e.Use(echomw.LoggerWithConfig(echomw.LoggerConfig{
-		Format: "${time_rfc3339} ${method} ${uri} ${status} ${latency_human} ${remote_ip}\n",
+	e.Use(echomw.RequestLoggerWithConfig(echomw.RequestLoggerConfig{
+		LogURI:       true,
+		LogStatus:    true,
+		LogMethod:    true,
+		LogLatency:   true,
+		LogRemoteIP:  true,
+		LogValuesFunc: func(c echo.Context, v echomw.RequestLoggerValues) error {
+			log.Printf("%s %s %d %s %s", v.Method, v.URI, v.Status, v.Latency, v.RemoteIP)
+			return nil
+		},
 	}))
 
 	// Rate limiting: 200 API requests per minute per IP (static assets excluded).
@@ -229,10 +237,10 @@ func startServer(e *echo.Echo, tlsMode, httpPort, httpsPort string) error {
 // and serves health checks for Docker HEALTHCHECK.
 func startHTTPRedirect(httpPort, httpsPort string) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"healthy"}`))
+		_, _ = w.Write([]byte(`{"status":"healthy"}`))
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
@@ -243,7 +251,13 @@ func startHTTPRedirect(httpPort, httpsPort string) {
 		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 	log.Printf("[INFO] Starting HTTP redirect on :%s -> :%s", httpPort, httpsPort)
-	if err := http.ListenAndServe(":"+httpPort, mux); err != nil && err != http.ErrServerClosed {
+	srv := &http.Server{
+		Addr:         ":" + httpPort,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("[WARN] HTTP redirect server error: %v", err)
 	}
 }

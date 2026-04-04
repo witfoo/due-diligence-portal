@@ -95,6 +95,7 @@ issues:
       linters:
         - gosec
         - errcheck
+        - unparam
     - linters:
         - unparam
       text: "always receives"

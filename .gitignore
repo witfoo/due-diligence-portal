@@ -53,7 +53,12 @@ Thumbs.db
 /portal
 
 # Utils (separate tooling, not part of the portal)
-utils/
+/utils/
+
+# Root-level npm artifacts (UI uses ui/package.json)
+/package.json
+/package-lock.json
+/node_modules/
 
 # Claude
 .claude/plans/
