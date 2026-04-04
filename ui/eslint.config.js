@@ -40,6 +40,13 @@ export default [
 		}
 	},
 	{
+		files: ['tests/e2e/**/*.{js,ts}'],
+		rules: {
+			'security/detect-non-literal-fs-filename': 'off',
+			'security/detect-non-literal-require': 'off'
+		}
+	},
+	{
 		ignores: ['build/**', '.svelte-kit/**', 'dist/**', 'node_modules/**']
 	}
 ];
