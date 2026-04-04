@@ -37,12 +37,12 @@ type User struct {
 
 // InviteToken represents an invitation to join the portal.
 type InviteToken struct {
-	ID        string    `json:"id"`
-	Token     string    `json:"token"`
-	Email     string    `json:"email"`
-	Role      string    `json:"role"`
-	InvitedBy string    `json:"invited_by"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID        string     `json:"id"`
+	Token     string     `json:"token"`
+	Email     string     `json:"email"`
+	Role      string     `json:"role"`
+	InvitedBy string     `json:"invited_by"`
+	ExpiresAt time.Time  `json:"expires_at"`
 	UsedAt    *time.Time `json:"used_at,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 }

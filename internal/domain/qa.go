@@ -11,15 +11,15 @@ const (
 
 // QAThread represents a Q&A conversation thread.
 type QAThread struct {
-	ID         string     `json:"id"`
-	Subject    string     `json:"subject"`
-	DocumentID *string    `json:"document_id,omitempty"`
-	CategoryID *string    `json:"category_id,omitempty"`
-	Status     string     `json:"status"`
-	AskedBy    string     `json:"asked_by"`
-	AssignedTo *string    `json:"assigned_to,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID         string    `json:"id"`
+	Subject    string    `json:"subject"`
+	DocumentID *string   `json:"document_id,omitempty"`
+	CategoryID *string   `json:"category_id,omitempty"`
+	Status     string    `json:"status"`
+	AskedBy    string    `json:"asked_by"`
+	AssignedTo *string   `json:"assigned_to,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 
 	// Joined fields.
 	AskedByName    string `json:"asked_by_name,omitempty"`

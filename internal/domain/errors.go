@@ -44,7 +44,7 @@ var (
 
 // NDA errors.
 var (
-	ErrNDARequired    = errors.New("NDA signature required")
+	ErrNDARequired      = errors.New("NDA signature required")
 	ErrNDAAlreadySigned = errors.New("NDA already signed")
 )
 

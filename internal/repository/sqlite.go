@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"sync"
 
 	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
@@ -14,14 +13,13 @@ import (
 // and other production-ready pragmas.
 type DB struct {
 	*sql.DB
-	mu sync.RWMutex
 }
 
 // New opens a SQLite database at the given path and configures it
 // with WAL mode, foreign keys, and busy timeout.
 // Use ":memory:" for in-memory databases (testing).
 func New(dbPath string) (*DB, error) {
-	dsn := dbPath
+	var dsn string
 	if dbPath != ":memory:" {
 		dsn = fmt.Sprintf("file:%s?_journal_mode=WAL&_foreign_keys=ON&_busy_timeout=5000&_synchronous=NORMAL", dbPath)
 	} else {

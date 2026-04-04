@@ -75,7 +75,7 @@ func main() {
 		LogMethod:    true,
 		LogLatency:   true,
 		LogRemoteIP:  true,
-		LogValuesFunc: func(c echo.Context, v echomw.RequestLoggerValues) error {
+		LogValuesFunc: func(_ echo.Context, v echomw.RequestLoggerValues) error {
 			log.Printf("%s %s %d %s %s", v.Method, v.URI, v.Status, v.Latency, v.RemoteIP)
 			return nil
 		},
