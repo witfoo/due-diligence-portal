@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"net/mail"
 	"net/smtp"
 	"strings"
 
@@ -95,15 +96,21 @@ func (s *EmailService) send(to, subject, body string) error {
 		return nil
 	}
 
-	// Sanitize all inputs to prevent header injection (CRLF) and log injection.
-	sanitizedTo := sanitizeEmailHeader(to)
+	// Validate and parse the recipient address (CodeQL-recognized sanitizer).
+	addr, err := mail.ParseAddress(to)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address %q: %w", sanitizeLogValue(to), err)
+	}
+	validatedTo := addr.Address
+
+	// Sanitize subject and body to prevent header/content injection.
 	sanitizedSubject := sanitizeEmailHeader(subject)
 	sanitizedBody := sanitizeEmailBody(body)
 
-	// Build message with sanitized components only.
-	msg := buildEmailMessage(s.from, sanitizedTo, sanitizedSubject, sanitizedBody)
+	// Build message from validated/sanitized parts only.
+	msg := buildEmailMessage(s.from, validatedTo, sanitizedSubject, sanitizedBody)
 
-	addr := s.host + ":" + s.port
+	smtpAddr := s.host + ":" + s.port
 
 	var auth smtp.Auth
 	if s.username != "" {
@@ -111,9 +118,9 @@ func (s *EmailService) send(to, subject, body string) error {
 	}
 
 	if s.useTLS {
-		return s.sendWithTLS(addr, auth, s.from, sanitizedTo, msg)
+		return s.sendWithTLS(smtpAddr, auth, s.from, validatedTo, msg)
 	}
-	return smtp.SendMail(addr, auth, s.from, []string{sanitizedTo}, msg)
+	return smtp.SendMail(smtpAddr, auth, s.from, []string{validatedTo}, msg)
 }
 
 // buildEmailMessage constructs an RFC 2822 message from sanitized parts.
