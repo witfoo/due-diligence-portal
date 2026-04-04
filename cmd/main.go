@@ -312,13 +312,8 @@ func ensureSelfSignedCert(certDir string) (certPath, keyPath string, err error) 
 	}
 
 	// Write certificate file.
-	certFile, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return "", "", fmt.Errorf("write cert file: %w", err)
-	}
-	defer certFile.Close()
-	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
-		return "", "", fmt.Errorf("encode cert PEM: %w", err)
+	if err := writePEMFile(certPath, "CERTIFICATE", certDER, 0o644); err != nil {
+		return "", "", fmt.Errorf("write cert: %w", err)
 	}
 
 	// Write key file.
@@ -326,13 +321,8 @@ func ensureSelfSignedCert(certDir string) (certPath, keyPath string, err error) 
 	if err != nil {
 		return "", "", fmt.Errorf("marshal key: %w", err)
 	}
-	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return "", "", fmt.Errorf("write key file: %w", err)
-	}
-	defer keyFile.Close()
-	if err := pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
-		return "", "", fmt.Errorf("encode key PEM: %w", err)
+	if err := writePEMFile(keyPath, "EC PRIVATE KEY", keyDER, 0o600); err != nil {
+		return "", "", fmt.Errorf("write key: %w", err)
 	}
 
 	log.Printf("[INFO] Self-signed certificate generated: %s", certPath)
@@ -359,11 +349,16 @@ func setupStaticFiles(e *echo.Echo) {
 				return
 			}
 
-			// Try to serve the exact file.
-			fullPath := filepath.Join(uiBuildPath, filepath.Clean(path))
-			if _, err := os.Stat(fullPath); err == nil {
-				fileServer.ServeHTTP(w, r)
-				return
+			// Try to serve the exact file (path-traversal safe: Clean + HasPrefix check).
+			cleanPath := filepath.Clean(path)
+			fullPath := filepath.Join(uiBuildPath, cleanPath)
+			absBase, _ := filepath.Abs(uiBuildPath)
+			absFull, _ := filepath.Abs(fullPath)
+			if strings.HasPrefix(absFull, absBase) {
+				if _, err := os.Stat(fullPath); err == nil {
+					fileServer.ServeHTTP(w, r)
+					return
+				}
 			}
 
 			// SPA fallback: serve index.html for client-side routing.
@@ -381,6 +376,23 @@ func setupStaticFiles(e *echo.Echo) {
 <body><h1>Due Diligence Portal</h1><p>UI not built. Run <code>cd ui && npm run build</code></p></body>
 </html>`)
 	})
+}
+
+// writePEMFile writes a PEM-encoded block to a file, ensuring the file is
+// properly closed after writing (handles the errcheck/unhandled-close issue).
+func writePEMFile(path, blockType string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	if err := pem.Encode(f, &pem.Block{Type: blockType, Bytes: data}); err != nil {
+		f.Close()
+		return fmt.Errorf("encode PEM to %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	return nil
 }
 
 // Ensure fs package is used (needed for future embed.FS usage).

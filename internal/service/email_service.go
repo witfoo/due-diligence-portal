@@ -90,14 +90,19 @@ Log in to the portal to view the signature details.`, signerName, signerEmail, t
 
 func (s *EmailService) send(to, subject, body string) error {
 	if !s.IsEnabled() {
-		log.Printf("[INFO] Email disabled, would send to %s: %s", to, subject)
+		log.Printf("[INFO] Email disabled, would send to %s: %s",
+			sanitizeLogValue(to), sanitizeLogValue(subject))
 		return nil
 	}
 
+	// Sanitize headers to prevent email injection (CRLF injection).
+	sanitizedTo := sanitizeEmailHeader(to)
+	sanitizedSubject := sanitizeEmailHeader(subject)
+
 	msg := strings.Join([]string{
 		"From: " + s.from,
-		"To: " + to,
-		"Subject: " + subject,
+		"To: " + sanitizedTo,
+		"Subject: " + sanitizedSubject,
 		"MIME-Version: 1.0",
 		"Content-Type: text/plain; charset=UTF-8",
 		"",
@@ -112,9 +117,29 @@ func (s *EmailService) send(to, subject, body string) error {
 	}
 
 	if s.useTLS {
-		return s.sendWithTLS(addr, auth, s.from, to, []byte(msg))
+		return s.sendWithTLS(addr, auth, s.from, sanitizedTo, []byte(msg))
 	}
-	return smtp.SendMail(addr, auth, s.from, []string{to}, []byte(msg))
+	return smtp.SendMail(addr, auth, s.from, []string{sanitizedTo}, []byte(msg))
+}
+
+// sanitizeEmailHeader removes CR/LF characters that could enable header injection.
+func sanitizeEmailHeader(value string) string {
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	return value
+}
+
+// sanitizeLogValue replaces control characters for safe log output (CWE-117).
+func sanitizeLogValue(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (s *EmailService) sendWithTLS(addr string, auth smtp.Auth, from, to string, msg []byte) error {

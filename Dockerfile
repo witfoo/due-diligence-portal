@@ -1,7 +1,7 @@
 # =============================================================
 # Stage 1: Build UI static assets
 # =============================================================
-FROM node:22-alpine AS ui-builder
+FROM node:24-alpine AS ui-builder
 
 WORKDIR /build/ui
 

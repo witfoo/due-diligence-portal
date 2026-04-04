@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/labstack/echo/v4"
 
@@ -10,6 +10,7 @@ import (
 	"github.com/witfoo/due-diligence-portal/internal/repository"
 	"github.com/witfoo/due-diligence-portal/internal/service"
 	"github.com/witfoo/due-diligence-portal/pkg/response"
+	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
 // UserHandler handles user management endpoints.
@@ -170,7 +171,8 @@ func (h *UserHandler) Invite(c echo.Context) error {
 		portalURL := "https://" + c.Request().Host
 		if err := h.emailSvc.SendInvite(req.Email, invite.Token, portalURL); err != nil {
 			// Non-fatal: log but don't fail the invite creation.
-			fmt.Printf("[WARN] Failed to send invite email to %s: %v\n", req.Email, err)
+			log.Printf("[WARN] Failed to send invite email to %s: %v",
+				sanitize.LogValue(req.Email), err)
 		}
 	}
 
