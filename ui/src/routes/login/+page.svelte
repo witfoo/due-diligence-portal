@@ -20,8 +20,13 @@
 			}>('/auth/login', { email, password });
 
 			if (resp.data) {
+				const u = resp.data.user;
 				authStore.setAuth(
-					{ ...resp.data.user, is_active: true, created_at: '', updated_at: '' },
+					{
+						id: u.id, email: u.email, name: u.name,
+						role: u.role as 'admin' | 'company_member' | 'investor',
+						is_active: true, created_at: '', updated_at: ''
+					},
 					resp.data.access_token
 				);
 				window.location.href = '/documents';

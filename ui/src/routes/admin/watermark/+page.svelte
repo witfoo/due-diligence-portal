@@ -73,7 +73,7 @@
 		<div class="field">
 			<label for="template">Text Template</label>
 			<input id="template" type="text" bind:value={config.text_template}
-				placeholder="{{user_email}} - {{date}}" />
+				placeholder={'{{user_email}} - {{date}}'} />
 			<span class="hint">Variables: {'{{user_email}}'}, {'{{user_name}}'}, {'{{date}}'}, {'{{document_name}}'}</span>
 		</div>
 
