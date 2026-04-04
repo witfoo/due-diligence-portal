@@ -1,0 +1,74 @@
+/* Due Diligence Portal - Global Styles
+ * Uses Carbon Design System g90 theme as base.
+ * WitFoo branding colors applied via branding engine.
+ */
+
+/* CSS Custom Properties (defaults, overridden by branding engine) */
+:root {
+	--dd-primary: #0f62fe;
+	--dd-secondary: #393939;
+	--dd-accent: #f1c21b;
+	--dd-error: #da1e28;
+	--dd-warning: #f1c21b;
+	--dd-success: #24a148;
+	--dd-info: #4589ff;
+	--dd-background: #161616;
+	--dd-surface: #262626;
+	--dd-text: #f4f4f4;
+	--dd-text-secondary: #c6c6c6;
+	--dd-border: #393939;
+	--dd-hover: #353535;
+	--dd-active: #525252;
+	--dd-header: #161616;
+	--dd-sidebar: #1c1c1c;
+}
+
+/* Base styles */
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html {
+	font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+		Roboto, 'Helvetica Neue', Arial, sans-serif;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	background-color: var(--dd-background);
+	color: var(--dd-text);
+	min-height: 100vh;
+}
+
+a {
+	color: var(--dd-primary);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: var(--dd-background);
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--dd-border);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--dd-active);
+}

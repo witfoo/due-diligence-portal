@@ -1,0 +1,38 @@
+---
+# HTTP-only deployment behind a load balancer.
+# TLS termination handled by the load balancer.
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+    compress: "true"
+
+services:
+  portal:
+    image: ghcr.io/witfoo/due-diligence-portal:latest
+    container_name: dd-portal
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    environment:
+      DD_TLS_MODE: none
+      DD_HTTP_PORT: "8080"
+      DD_JWT_SECRET: "${DD_JWT_SECRET}"
+      DD_DB_PATH: /data/portal.db
+      DD_UI_PATH: /app/ui/build
+      DD_MAX_UPLOAD_SIZE: "${DD_MAX_UPLOAD_SIZE:-104857600}"
+      DD_ADMIN_EMAIL: "${DD_ADMIN_EMAIL:-admin@localhost}"
+      DD_ADMIN_PASSWORD: "${DD_ADMIN_PASSWORD:-}"
+      DD_SMTP_ENABLED: "${DD_SMTP_ENABLED:-false}"
+      DD_SMTP_HOST: "${DD_SMTP_HOST:-}"
+      DD_SMTP_PORT: "${DD_SMTP_PORT:-587}"
+      DD_SMTP_FROM: "${DD_SMTP_FROM:-noreply@example.com}"
+    volumes:
+      - portal-data:/data
+    logging: *default-logging
+
+volumes:
+  portal-data:
+    driver: local

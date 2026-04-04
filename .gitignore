@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+ui/node_modules/
+
+# Build output
+ui/build/
+ui/.svelte-kit/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+coverage.out
+ui/playwright-report/
+ui/test-results/
+ui/tests/e2e/.auth/
+.test-sessions/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Certificates
+/certs/
+*.crt
+*.key
+*.pem
+
+# Binary
+/portal
+
+# Utils (separate tooling, not part of the portal)
+utils/
+
+# Claude
+.claude/plans/

@@ -1,0 +1,100 @@
+---
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  skip-dirs:
+    - utils/internet-research
+
+output:
+  formats:
+    - format: colored-line-number
+  sort-results: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - unparam
+    - wastedassign
+    - gosec
+    - revive
+
+linters-settings:
+  gosec:
+    includes:
+      - G101
+      - G102
+      - G103
+      - G104
+      - G106
+      - G107
+      - G108
+      - G109
+      - G110
+      - G111
+      - G112
+      - G113
+      - G114
+      - G201
+      - G202
+      - G203
+      - G204
+      - G301
+      - G302
+      - G303
+      - G304
+      - G305
+      - G306
+      - G307
+      - G401
+      - G402
+      - G403
+      - G404
+      - G501
+      - G502
+      - G503
+      - G601
+      - G602
+      - G701
+      - G702
+      - G703
+      - G704
+      - G705
+      - G706
+    config:
+      G701:
+        taint-analysis: true
+      G702:
+        taint-analysis: true
+      G703:
+        taint-analysis: true
+      G704:
+        taint-analysis: true
+      G705:
+        taint-analysis: true
+      G706:
+        taint-analysis: true
+  revive:
+    config-file: revive.toml
+  goimports:
+    local-prefixes: github.com/witfoo/due-diligence-portal
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+    - linters:
+        - unparam
+      text: "always receives"

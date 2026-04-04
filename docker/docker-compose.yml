@@ -1,0 +1,56 @@
+---
+# Default deployment: self-signed TLS on port 443.
+# Generate JWT secret: openssl rand -hex 32
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+    compress: "true"
+
+services:
+  portal:
+    image: ghcr.io/witfoo/due-diligence-portal:latest
+    container_name: dd-portal
+    restart: unless-stopped
+    ports:
+      - "443:8443"
+      - "80:8080"
+    environment:
+      DD_TLS_MODE: self-signed
+      DD_JWT_SECRET: "${DD_JWT_SECRET}"
+      DD_DB_PATH: /data/portal.db
+      DD_HTTP_PORT: "8080"
+      DD_HTTPS_PORT: "8443"
+      DD_UI_PATH: /app/ui/build
+      DD_MAX_UPLOAD_SIZE: "${DD_MAX_UPLOAD_SIZE:-104857600}"
+      DD_ADMIN_EMAIL: "${DD_ADMIN_EMAIL:-admin@localhost}"
+      DD_ADMIN_PASSWORD: "${DD_ADMIN_PASSWORD:-}"
+      DD_SMTP_ENABLED: "${DD_SMTP_ENABLED:-false}"
+      DD_SMTP_HOST: "${DD_SMTP_HOST:-}"
+      DD_SMTP_PORT: "${DD_SMTP_PORT:-587}"
+      DD_SMTP_USERNAME: "${DD_SMTP_USERNAME:-}"
+      DD_SMTP_PASSWORD: "${DD_SMTP_PASSWORD:-}"
+      DD_SMTP_FROM: "${DD_SMTP_FROM:-noreply@example.com}"
+      DD_SMTP_TLS: "${DD_SMTP_TLS:-true}"
+    volumes:
+      - portal-data:/data
+    logging: *default-logging
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --no-verbose
+        - --tries=1
+        - -O
+        - /dev/null
+        - http://localhost:8080/health
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  portal-data:
+    driver: local

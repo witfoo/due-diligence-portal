@@ -1,0 +1,34 @@
+---
+repos:
+  - repo: local
+    hooks:
+      - id: go-fmt
+        name: Go Format Check
+        entry: bash -c 'test -z "$(gofmt -l . 2>/dev/null | grep -v vendor/)"'
+        language: system
+        files: '\.go$'
+        exclude: '(vendor/|utils/internet-research/)'
+        pass_filenames: false
+
+      - id: go-vet
+        name: Go Vet
+        entry: bash -c 'go vet ./...'
+        language: system
+        files: '\.go$'
+        exclude: '(vendor/|utils/internet-research/)'
+        pass_filenames: false
+
+      - id: go-security-lint
+        name: Go Security Lint
+        entry: bash -c 'golangci-lint run --enable gosec --timeout 3m ./...'
+        language: system
+        files: '\.go$'
+        exclude: '(_test\.go|vendor/|utils/internet-research/)'
+        pass_filenames: false
+
+      - id: js-lint
+        name: JavaScript/TypeScript Lint
+        entry: bash -c 'cd ui && npx eslint src/ tests/ --max-warnings=0 2>/dev/null || true'
+        language: system
+        files: 'ui/(src|tests)/.*\.(ts|js|svelte)$'
+        pass_filenames: false

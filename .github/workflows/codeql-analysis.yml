@@ -1,0 +1,46 @@
+---
+name: CodeQL Analysis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['go', 'javascript']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: '1.26.1'
+      - uses: actions/setup-node@v4
+        if: matrix.language == 'javascript'
+        with:
+          node-version: '22'
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+      - name: Build Go
+        if: matrix.language == 'go'
+        run: go build ./...
+      - name: Install npm deps
+        if: matrix.language == 'javascript'
+        run: cd ui && npm ci
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
