@@ -4,6 +4,8 @@ A self-hosted portal for companies raising capital to securely share due diligen
 documents with investors. Packaged as a single Docker image with a Go API backend
 and Svelte 5 frontend.
 
+![Documents View](docs/screenshots/02-documents.png)
+
 ## Features
 
 - **Document management** -- Upload, categorize, version, and search documents with FTS5
@@ -92,6 +94,7 @@ cd ui && npm test                    # 10 Vitest unit tests
 
 | Document | Description |
 | --- | --- |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | User manual with annotated screenshots |
 | [docs/API.md](docs/API.md) | REST API reference (60+ endpoints) |
 | [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | All 20 environment variables |
 | [docs/TESTING.md](docs/TESTING.md) | Test pyramid, scripts, patterns |

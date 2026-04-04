@@ -341,7 +341,7 @@ func setupStaticFiles(e *echo.Echo) {
 
 		// Serve static files with SPA fallback.
 		// spaFileHandler uses http.Dir which handles path sanitization internally.
-		spaHandler := &spaFileHandler{fs: http.Dir(uiBuildPath), fallback: "index.html"}
+		spaHandler := newSPAFileHandler(http.Dir(uiBuildPath))
 		e.GET("/*", echo.WrapHandler(spaHandler))
 		return
 	}
@@ -375,11 +375,15 @@ func writePEMFile(path, blockType string, data []byte, perm os.FileMode) error {
 }
 
 // spaFileHandler serves static files from an http.FileSystem with SPA fallback.
-// If the requested file doesn't exist, it serves the fallback (index.html)
-// for client-side routing. Uses http.Dir which handles path sanitization.
+// If the requested file doesn't exist, it serves index.html for client-side routing.
+// Uses http.Dir which handles path sanitization internally (no user-controlled os.Stat).
 type spaFileHandler struct {
-	fs       http.FileSystem
-	fallback string
+	fs      http.FileSystem
+	handler http.Handler
+}
+
+func newSPAFileHandler(fs http.FileSystem) *spaFileHandler {
+	return &spaFileHandler{fs: fs, handler: http.FileServer(fs)}
 }
 
 func (h *spaFileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -394,15 +398,15 @@ func (h *spaFileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Try to open the file via http.Dir (handles path sanitization).
 	f, err := h.fs.Open(urlPath)
 	if err != nil {
-		// File not found — serve SPA fallback.
-		r.URL.Path = "/" + h.fallback
-		http.FileServer(h.fs).ServeHTTP(w, r)
+		// File not found — serve SPA fallback (index.html).
+		r.URL.Path = "/"
+		h.handler.ServeHTTP(w, r)
 		return
 	}
 	f.Close()
 
-	// File exists — serve it.
-	http.FileServer(h.fs).ServeHTTP(w, r)
+	// File exists — serve it directly.
+	h.handler.ServeHTTP(w, r)
 }
 
 // Ensure fs package is used (needed for future embed.FS usage).
