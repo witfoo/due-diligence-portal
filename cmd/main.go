@@ -70,11 +70,11 @@ func main() {
 	e.Use(echomw.RequestID())
 	e.Use(middleware.SecurityHeaders())
 	e.Use(echomw.RequestLoggerWithConfig(echomw.RequestLoggerConfig{
-		LogURI:       true,
-		LogStatus:    true,
-		LogMethod:    true,
-		LogLatency:   true,
-		LogRemoteIP:  true,
+		LogURI:      true,
+		LogStatus:   true,
+		LogMethod:   true,
+		LogLatency:  true,
+		LogRemoteIP: true,
 		LogValuesFunc: func(_ echo.Context, v echomw.RequestLoggerValues) error {
 			log.Printf("%s %s %d %s %s", v.Method, v.URI, v.Status, v.Latency, v.RemoteIP)
 			return nil

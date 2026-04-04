@@ -10,8 +10,8 @@ import (
 )
 
 type visitor struct {
-	count    int
-	resetAt  time.Time
+	count   int
+	resetAt time.Time
 }
 
 // RateLimiter provides per-IP rate limiting middleware.

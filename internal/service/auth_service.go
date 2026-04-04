@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	bcryptCost          = 12
-	accessTokenExpiry   = 15 * time.Minute
-	refreshTokenExpiry  = 7 * 24 * time.Hour
+	bcryptCost         = 12
+	accessTokenExpiry  = 15 * time.Minute
+	refreshTokenExpiry = 7 * 24 * time.Hour
 )
 
 // JWTClaims contains the custom claims for portal JWT tokens.

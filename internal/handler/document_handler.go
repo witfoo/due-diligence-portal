@@ -435,5 +435,3 @@ func (h *DocumentHandler) Search(c echo.Context) error {
 		HasMore:  total > 50,
 	})
 }
-
-
