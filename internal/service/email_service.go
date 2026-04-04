@@ -95,19 +95,13 @@ func (s *EmailService) send(to, subject, body string) error {
 		return nil
 	}
 
-	// Sanitize headers to prevent email injection (CRLF injection).
+	// Sanitize all inputs to prevent header injection (CRLF) and log injection.
 	sanitizedTo := sanitizeEmailHeader(to)
 	sanitizedSubject := sanitizeEmailHeader(subject)
+	sanitizedBody := sanitizeEmailBody(body)
 
-	msg := strings.Join([]string{
-		"From: " + s.from,
-		"To: " + sanitizedTo,
-		"Subject: " + sanitizedSubject,
-		"MIME-Version: 1.0",
-		"Content-Type: text/plain; charset=UTF-8",
-		"",
-		body,
-	}, "\r\n")
+	// Build message with sanitized components only.
+	msg := buildEmailMessage(s.from, sanitizedTo, sanitizedSubject, sanitizedBody)
 
 	addr := s.host + ":" + s.port
 
@@ -117,9 +111,20 @@ func (s *EmailService) send(to, subject, body string) error {
 	}
 
 	if s.useTLS {
-		return s.sendWithTLS(addr, auth, s.from, sanitizedTo, []byte(msg))
+		return s.sendWithTLS(addr, auth, s.from, sanitizedTo, msg)
 	}
-	return smtp.SendMail(addr, auth, s.from, []string{sanitizedTo}, []byte(msg))
+	return smtp.SendMail(addr, auth, s.from, []string{sanitizedTo}, msg)
+}
+
+// buildEmailMessage constructs an RFC 2822 message from sanitized parts.
+func buildEmailMessage(from, to, subject, body string) []byte {
+	headers := "From: " + from + "\r\n" +
+		"To: " + to + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=UTF-8\r\n" +
+		"\r\n"
+	return []byte(headers + body)
 }
 
 // sanitizeEmailHeader removes CR/LF characters that could enable header injection.
@@ -140,6 +145,13 @@ func sanitizeLogValue(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// sanitizeEmailBody removes sequences that could be interpreted as header boundaries.
+func sanitizeEmailBody(body string) string {
+	// Remove any CRLF+header patterns that could break out of the body section.
+	body = strings.ReplaceAll(body, "\r\n.\r\n", "\r\n..\r\n")
+	return body
 }
 
 func (s *EmailService) sendWithTLS(addr string, auth smtp.Auth, from, to string, msg []byte) error {
