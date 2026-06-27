@@ -34,8 +34,25 @@ func (h *NDAHandler) RegisterRoutes(g *echo.Group) {
 	g.POST("/nda/templates", h.CreateTemplate, adminOnly)
 	g.PUT("/nda/templates/:id", h.UpdateTemplate, adminOnly)
 	g.GET("/nda/status", h.CheckStatus)
+	g.GET("/nda/active", h.ActiveTemplate)
 	g.POST("/nda/sign/:templateId", h.Sign)
 	g.GET("/nda/signatures", h.ListSignatures, adminOnly)
+}
+
+// ActiveTemplate handles GET /nda/active, returning the current active NDA template
+// (id, name, content) to any authenticated user so they can read and sign it. Unlike
+// ListTemplates this is not admin-only, since investors must see the NDA to sign it.
+func (h *NDAHandler) ActiveTemplate(c echo.Context) error {
+	templates, err := h.ndaRepo.ListTemplates(c.Request().Context())
+	if err != nil {
+		return response.InternalError(c)
+	}
+	for _, tmpl := range templates {
+		if tmpl.IsActive {
+			return response.OK(c, "Active NDA template", tmpl)
+		}
+	}
+	return response.NotFound(c, "no active NDA template")
 }
 
 type createTemplateRequest struct {

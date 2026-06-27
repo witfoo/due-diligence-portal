@@ -14,25 +14,21 @@ class AuthStore {
 	isCompanyMember = $derived(this.user?.role === 'company_member');
 	isInvestor = $derived(this.user?.role === 'investor');
 
-	setAuth(user: User, token: string) {
+	setAuth(user: User, token: string, refreshToken?: string) {
 		this.user = user;
 		this.token = token;
-		if (typeof window !== 'undefined') {
-			localStorage.setItem('dd_auth_token', token);
-		}
+		api.setTokens(token, refreshToken);
 	}
 
 	clearAuth() {
 		this.user = null;
 		this.token = null;
-		if (typeof window !== 'undefined') {
-			localStorage.removeItem('dd_auth_token');
-		}
+		api.clearTokens();
 	}
 
 	loadFromStorage() {
 		if (typeof window === 'undefined') return;
-		const token = localStorage.getItem('dd_auth_token');
+		const token = api.getToken();
 		if (token) {
 			this.token = token;
 		}

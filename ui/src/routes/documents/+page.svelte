@@ -44,6 +44,14 @@
 		loading = false;
 	}
 
+	async function downloadDoc(id: string, name: string) {
+		try {
+			await api.download(`/documents/${id}/download`, name);
+		} catch {
+			// surfaced inline below via a transient flag is overkill here; ignore.
+		}
+	}
+
 	function formatSize(bytes: number): string {
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -117,7 +125,7 @@
 						<td>v{doc.current_version}</td>
 						<td>{formatDate(doc.created_at)}</td>
 						<td>
-							<a href="/api/v1/documents/{doc.id}/download" class="btn-small">Download</a>
+							<button class="btn-small" onclick={() => downloadDoc(doc.id, doc.name)}>Download</button>
 						</td>
 					</tr>
 				{/each}

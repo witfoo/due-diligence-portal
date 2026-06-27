@@ -6,6 +6,30 @@ import type { BrandingConfig } from '$types/api';
 
 const STYLE_ID = 'dd-branding-overrides';
 
+// Accept only well-formed CSS colors (hex, rgb/rgba, hsl/hsla) so a stored branding
+// value cannot break out of the declaration and inject arbitrary CSS rules. This is
+// defense-in-depth alongside the server-side validation in the branding handler.
+// Whitespace is stripped first, so the patterns themselves contain no repeated
+// optional-whitespace groups (avoids any backtracking concern).
+// These patterns are linear-time (no nested unbounded quantifiers); the safe-regex
+// lint heuristic flags them as a false positive, so it is disabled per line.
+const HEX_RE = /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+// eslint-disable-next-line security/detect-unsafe-regex
+const RGB_RE = /^rgba?\(\d{1,3},\d{1,3},\d{1,3}(?:,(?:0|1|0?\.\d+))?\)$/;
+// eslint-disable-next-line security/detect-unsafe-regex
+const HSL_RE = /^hsla?\(\d{1,3},\d{1,3}%,\d{1,3}%(?:,(?:0|1|0?\.\d+))?\)$/;
+
+function isValidColor(value: string): boolean {
+	const v = value.trim();
+	if (HEX_RE.test(v)) return true;
+	const compact = v.replace(/\s+/g, '');
+	return RGB_RE.test(compact) || HSL_RE.test(compact);
+}
+
+// Allow only a conservative character set for font-family values.
+// eslint-disable-next-line security/detect-unsafe-regex
+const FONT_RE = /^[\w,'"-]+(?: [\w,'"-]+)*$/;
+
 const COLOR_MAP: Record<string, string> = {
 	primary_color: '--dd-primary',
 	secondary_color: '--dd-secondary',
@@ -37,16 +61,16 @@ export function applyBrandingCSS(config: BrandingConfig): void {
 		existing.remove();
 	}
 
-	// Build CSS custom properties.
+	// Build CSS custom properties from validated color values only.
 	const properties: string[] = [];
 	for (const [configKey, cssVar] of Object.entries(COLOR_MAP)) {
 		const value = config[configKey as keyof BrandingConfig] as string;
-		if (value) {
+		if (value && isValidColor(value)) {
 			properties.push(`${cssVar}: ${value};`);
 		}
 	}
 
-	if (config.font_family) {
+	if (config.font_family && FONT_RE.test(config.font_family)) {
 		properties.push(`--dd-font-family: ${config.font_family};`);
 	}
 
