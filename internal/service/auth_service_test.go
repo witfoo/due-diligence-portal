@@ -195,14 +195,14 @@ func TestAuthService_EnsureAdminExists(t *testing.T) {
 	svc, repo := setupAuthTest(t)
 	ctx := context.Background()
 
-	err := svc.EnsureAdminExists(ctx, "first@test.com", "adminpass")
+	_, err := svc.EnsureAdminExists(ctx, "first@test.com", "adminpass")
 	require.NoError(t, err)
 
 	count, _ := repo.Count(ctx)
 	assert.Equal(t, 1, count)
 
 	// Second call should be a no-op.
-	err = svc.EnsureAdminExists(ctx, "second@test.com", "pass2")
+	_, err = svc.EnsureAdminExists(ctx, "second@test.com", "pass2")
 	require.NoError(t, err)
 
 	count, _ = repo.Count(ctx)

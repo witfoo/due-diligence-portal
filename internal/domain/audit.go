@@ -26,9 +26,10 @@ const (
 	AuditPermissionRevoked = "permission.revoked"
 	AuditPermissionUpdated = "permission.updated"
 
-	AuditQACreated  = "qa.created"
-	AuditQAAnswered = "qa.answered"
-	AuditQAClosed   = "qa.closed"
+	AuditQACreated       = "qa.created"
+	AuditQAAnswered      = "qa.answered"
+	AuditQAClosed        = "qa.closed"
+	AuditQAMessagePosted = "qa.message_posted"
 
 	AuditNDASigned  = "nda.signed"
 	AuditNDACreated = "nda.created"

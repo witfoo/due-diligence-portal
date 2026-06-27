@@ -90,8 +90,10 @@ func TestFileName(t *testing.T) {
 		want  string
 	}{
 		{"clean name", "report.pdf", "report.pdf"},
-		{"path traversal", "../../etc/passwd", "etcpasswd"},
-		{"backslash", "..\\..\\windows\\system32", "windowssystem32"},
+		// Hardened FileName drops any directory component (filepath.Base) so traversal
+		// sequences cannot survive; only the final path element is kept.
+		{"path traversal", "../../etc/passwd", "passwd"},
+		{"backslash", "..\\..\\windows\\system32", "system32"},
 		{"null byte", "file\x00.pdf", "file.pdf"},
 		{"empty becomes unnamed", "", "unnamed"},
 		{"spaces only becomes unnamed", "   ", "unnamed"},

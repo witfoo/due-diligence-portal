@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"fmt"
+
 	"github.com/labstack/echo/v4"
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
@@ -11,13 +13,20 @@ import (
 
 // QAHandler handles Q&A endpoints.
 type QAHandler struct {
-	qaRepo repository.QARepository
-	audit  *middleware.AuditLogger
+	qaRepo   repository.QARepository
+	permRepo repository.PermissionRepository
+	audit    *middleware.AuditLogger
 }
 
 // NewQAHandler creates a new QAHandler.
-func NewQAHandler(qaRepo repository.QARepository, audit *middleware.AuditLogger) *QAHandler {
-	return &QAHandler{qaRepo: qaRepo, audit: audit}
+func NewQAHandler(qaRepo repository.QARepository, permRepo repository.PermissionRepository, audit *middleware.AuditLogger) *QAHandler {
+	return &QAHandler{qaRepo: qaRepo, permRepo: permRepo, audit: audit}
+}
+
+// isPrivileged reports whether the role is staff (admin or company member), which
+// may see all threads/messages; other roles (investors) are scoped to their own.
+func isPrivileged(role string) bool {
+	return role == domain.RoleAdmin || role == domain.RoleCompanyMember
 }
 
 // RegisterRoutes registers Q&A routes on the given group.
@@ -41,7 +50,13 @@ func (h *QAHandler) ListThreads(c echo.Context) error {
 	limit := 50
 	offset := 0
 
-	threads, total, err := h.qaRepo.ListThreads(c.Request().Context(), status, limit, offset)
+	// Investors only see their own threads; staff see all.
+	askedBy := ""
+	if !isPrivileged(middleware.GetUserRole(c)) {
+		askedBy = middleware.GetUserID(c)
+	}
+
+	threads, total, err := h.qaRepo.ListThreads(c.Request().Context(), status, askedBy, limit, offset)
 	if err != nil {
 		return response.InternalError(c)
 	}
@@ -64,6 +79,31 @@ func (h *QAHandler) CreateThread(c echo.Context) error {
 
 	if req.Subject == "" {
 		return response.BadRequest(c, "subject is required")
+	}
+
+	// Investors may only attach a question to a document/category they can access,
+	// preventing them from referencing (and revealing) resources they lack a grant for.
+	if !isPrivileged(middleware.GetUserRole(c)) {
+		userID := middleware.GetUserID(c)
+		ctx := c.Request().Context()
+		if req.DocumentID != nil && *req.DocumentID != "" {
+			ok, err := h.permRepo.HasAccess(ctx, userID, domain.ResourceDocument, *req.DocumentID, domain.AccessView)
+			if err != nil {
+				return response.InternalError(c)
+			}
+			if !ok {
+				return response.Forbidden(c, "no access to the referenced document")
+			}
+		}
+		if req.CategoryID != nil && *req.CategoryID != "" {
+			ok, err := h.permRepo.HasAccess(ctx, userID, domain.ResourceCategory, *req.CategoryID, domain.AccessView)
+			if err != nil {
+				return response.InternalError(c)
+			}
+			if !ok {
+				return response.Forbidden(c, "no access to the referenced category")
+			}
+		}
 	}
 
 	id, err := generateHandlerID()
@@ -101,7 +141,13 @@ func (h *QAHandler) GetThread(c echo.Context) error {
 		return response.InternalError(c)
 	}
 
-	messages, err := h.qaRepo.ListMessages(c.Request().Context(), id)
+	// Investors may only view their own thread, and never company-internal messages.
+	privileged := isPrivileged(middleware.GetUserRole(c))
+	if !privileged && thread.AskedBy != middleware.GetUserID(c) {
+		return response.NotFound(c, "thread not found")
+	}
+
+	messages, err := h.qaRepo.ListMessages(c.Request().Context(), id, privileged)
 	if err != nil {
 		return response.InternalError(c)
 	}
@@ -130,20 +176,22 @@ func (h *QAHandler) PostMessage(c echo.Context) error {
 		return response.BadRequest(c, "body is required")
 	}
 
-	// Verify thread exists.
-	if _, err := h.qaRepo.GetThread(c.Request().Context(), threadID); err != nil {
+	// Verify thread exists and the caller may post to it (investors only on their own).
+	thread, err := h.qaRepo.GetThread(c.Request().Context(), threadID)
+	if err != nil {
 		if err == domain.ErrThreadNotFound {
 			return response.NotFound(c, "thread not found")
 		}
 		return response.InternalError(c)
 	}
+	privileged := isPrivileged(middleware.GetUserRole(c))
+	if !privileged && thread.AskedBy != middleware.GetUserID(c) {
+		return response.NotFound(c, "thread not found")
+	}
 
 	isInternal := false
-	if req.IsInternal != nil {
-		role := middleware.GetUserRole(c)
-		if role == domain.RoleAdmin || role == domain.RoleCompanyMember {
-			isInternal = *req.IsInternal
-		}
+	if req.IsInternal != nil && privileged {
+		isInternal = *req.IsInternal
 	}
 
 	id, err := generateHandlerID()
@@ -162,6 +210,9 @@ func (h *QAHandler) PostMessage(c echo.Context) error {
 	if err := h.qaRepo.CreateMessage(c.Request().Context(), msg); err != nil {
 		return response.InternalError(c)
 	}
+
+	h.audit.LogFromContext(c, domain.AuditQAMessagePosted, "qa_thread", threadID, thread.Subject,
+		fmt.Sprintf("internal=%t", isInternal))
 
 	return response.Created(c, "Message posted", msg)
 }

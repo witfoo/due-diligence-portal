@@ -37,7 +37,8 @@ func setupNDAHandlerTest(t *testing.T) (*echo.Echo, *NDAHandler, string) {
 	ndaHandler.RegisterRoutes(g)
 
 	// Create test admin user and get token.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 

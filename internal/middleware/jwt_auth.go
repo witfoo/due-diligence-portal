@@ -37,6 +37,12 @@ func JWTAuth(authSvc *service.AuthService) echo.MiddlewareFunc {
 				return response.Unauthorized(c, "invalid or expired token")
 			}
 
+			// Only access tokens authorize API calls; a refresh token must not be
+			// usable as a bearer token (token-type confusion).
+			if claims.TokenType != service.TokenTypeAccess {
+				return response.Unauthorized(c, "invalid or expired token")
+			}
+
 			// Inject claims into Echo context.
 			c.Set(ContextKeyUserID, claims.UserID)
 			c.Set(ContextKeyEmail, claims.Email)

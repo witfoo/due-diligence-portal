@@ -4,6 +4,7 @@
 package sanitize
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -129,15 +130,34 @@ func IsSVGAttrBlocked(name, value string) bool {
 	return false
 }
 
-// FileName sanitizes a filename for safe use, removing path traversal characters.
+var (
+	filenameUnsafe = regexp.MustCompile(`[^A-Za-z0-9._ -]`)
+	dotRuns        = regexp.MustCompile(`\.{2,}`)
+	hexColorRe     = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
+	rgbColorRe     = regexp.MustCompile(`^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$`)
+)
+
+// FileName sanitizes a filename for safe use, removing any path component and
+// neutralizing traversal sequences. The result is restricted to the
+// [A-Za-z0-9._-] allowlist with collapsed dot-runs, so it cannot reconstruct ".."
+// or contain separators regardless of input.
 func FileName(name string) string {
-	name = strings.ReplaceAll(name, "..", "")
-	name = strings.ReplaceAll(name, "/", "")
-	name = strings.ReplaceAll(name, "\\", "")
+	name = strings.ReplaceAll(name, "\\", "/") // treat Windows separators as path separators
+	name = filepath.Base(name)                 // drop any directory component
 	name = strings.ReplaceAll(name, "\x00", "")
-	name = strings.TrimSpace(name)
+	name = filenameUnsafe.ReplaceAllString(name, "_") // allowlist
+	name = dotRuns.ReplaceAllString(name, ".")        // collapse ".." -> "."
+	name = strings.Trim(name, ". ")
 	if name == "" {
 		name = "unnamed"
 	}
 	return name
+}
+
+// IsColor reports whether s is a syntactically valid CSS color (hex or rgb/rgba),
+// used to reject untrusted branding color values before they are injected into a
+// stylesheet.
+func IsColor(s string) bool {
+	s = strings.TrimSpace(s)
+	return hexColorRe.MatchString(s) || rgbColorRe.MatchString(s)
 }

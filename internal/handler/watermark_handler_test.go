@@ -36,7 +36,8 @@ func setupWatermarkHandlerTest(t *testing.T) (*echo.Echo, string) {
 	g := e.Group("/api/v1", authMW)
 	wmHandler.RegisterRoutes(g)
 
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 

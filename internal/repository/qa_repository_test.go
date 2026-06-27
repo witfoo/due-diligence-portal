@@ -107,22 +107,33 @@ func TestQARepository_ListThreads(t *testing.T) {
 	}
 
 	// List all.
-	threads, total, err := repo.ListThreads(ctx, "", 10, 0)
+	threads, total, err := repo.ListThreads(ctx, "", "", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 5, total)
 	assert.Len(t, threads, 5)
 
 	// Filter by status.
-	threads, total, err = repo.ListThreads(ctx, domain.QAStatusOpen, 10, 0)
+	threads, total, err = repo.ListThreads(ctx, domain.QAStatusOpen, "", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 3, total)
 	assert.Len(t, threads, 3)
 
 	// Pagination.
-	threads, total, err = repo.ListThreads(ctx, "", 2, 0)
+	threads, total, err = repo.ListThreads(ctx, "", "", 2, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 5, total)
 	assert.Len(t, threads, 2)
+
+	// Scope by asker (all threads were asked by "u1").
+	threads, total, err = repo.ListThreads(ctx, "", "u1", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 5, total)
+	assert.Len(t, threads, 5)
+
+	threads, total, err = repo.ListThreads(ctx, "", "someone-else", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 0, total)
+	assert.Len(t, threads, 0)
 }
 
 func TestQARepository_UpdateThreadStatus(t *testing.T) {
@@ -196,9 +207,22 @@ func TestQARepository_ListMessages(t *testing.T) {
 		}
 		require.NoError(t, repo.CreateMessage(ctx, msg))
 	}
+	// One internal (company-only) message.
+	require.NoError(t, repo.CreateMessage(ctx, &domain.QAMessage{
+		ID: "m-internal", ThreadID: "t1", AuthorID: "u1", Body: "internal note", IsInternal: true,
+	}))
 
-	messages, err := repo.ListMessages(ctx, "t1")
+	// includeInternal=true returns all four.
+	messages, err := repo.ListMessages(ctx, "t1", true)
+	require.NoError(t, err)
+	assert.Len(t, messages, 4)
+	assert.Equal(t, "Message 0", messages[0].Body)
+
+	// includeInternal=false hides the internal message.
+	messages, err = repo.ListMessages(ctx, "t1", false)
 	require.NoError(t, err)
 	assert.Len(t, messages, 3)
-	assert.Equal(t, "Message 0", messages[0].Body)
+	for _, m := range messages {
+		assert.False(t, m.IsInternal)
+	}
 }

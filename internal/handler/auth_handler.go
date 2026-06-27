@@ -20,11 +20,13 @@ func NewAuthHandler(authSvc *service.AuthService, audit *middleware.AuditLogger)
 	return &AuthHandler{authSvc: authSvc, audit: audit}
 }
 
-// RegisterRoutes registers auth routes.
-func (h *AuthHandler) RegisterRoutes(e *echo.Echo, authMiddleware echo.MiddlewareFunc) {
-	e.POST("/api/v1/auth/login", h.Login)
-	e.POST("/api/v1/auth/register", h.Register)
-	e.POST("/api/v1/auth/refresh", h.Refresh)
+// RegisterRoutes registers auth routes. loginThrottle is a stricter per-IP rate
+// limiter applied to the unauthenticated credential endpoints to resist online
+// brute-force / credential-stuffing (the global limiter is too permissive for login).
+func (h *AuthHandler) RegisterRoutes(e *echo.Echo, authMiddleware, loginThrottle echo.MiddlewareFunc) {
+	e.POST("/api/v1/auth/login", h.Login, loginThrottle)
+	e.POST("/api/v1/auth/register", h.Register, loginThrottle)
+	e.POST("/api/v1/auth/refresh", h.Refresh, loginThrottle)
 	e.GET("/api/v1/auth/me", h.Me, authMiddleware)
 }
 
