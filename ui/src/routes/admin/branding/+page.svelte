@@ -43,6 +43,23 @@
 		}
 	}
 
+	async function uploadAsset(key: string, e: Event) {
+		const target = e.target as HTMLInputElement;
+		const file = target.files?.[0];
+		if (!file) return;
+		message = '';
+		try {
+			const form = new FormData();
+			form.append('file', file);
+			await api.upload(`/branding/assets/${key}`, form);
+			message = `${key} uploaded.`;
+		} catch {
+			message = `Failed to upload ${key} (PNG, JPEG, GIF, WEBP, BMP, or ICO only).`;
+		} finally {
+			target.value = '';
+		}
+	}
+
 	$effect(() => { loadConfig(); });
 </script>
 
@@ -87,13 +104,25 @@
 				['Success', 'success_color']
 			] as [label, key]}
 				<div class="color-field">
-					<label>{label}</label>
+					<span class="group-label">{label}</span>
 					<div class="color-input">
-						<input type="color" bind:value={config[key as keyof BrandingConfig]} />
-						<input type="text" bind:value={config[key as keyof BrandingConfig]} />
+						<input type="color" aria-label="{label} color picker" bind:value={config[key as keyof BrandingConfig]} />
+						<input type="text" aria-label="{label} color value" bind:value={config[key as keyof BrandingConfig]} />
 					</div>
 				</div>
 			{/each}
+		</div>
+	</section>
+
+	<section>
+		<h2>Assets</h2>
+		<div class="field">
+			<label for="logo-upload">Logo (PNG, JPEG, GIF, WEBP, BMP, ICO)</label>
+			<input id="logo-upload" type="file" accept="image/*" onchange={(e) => uploadAsset('logo', e)} />
+		</div>
+		<div class="field">
+			<label for="favicon-upload">Favicon</label>
+			<input id="favicon-upload" type="file" accept="image/*" onchange={(e) => uploadAsset('favicon', e)} />
 		</div>
 	</section>
 
@@ -127,7 +156,7 @@
 	}
 
 	.color-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
-	.color-field label { display: block; font-size: 0.75rem; color: var(--dd-text-secondary); margin-bottom: 0.25rem; }
+	.color-field .group-label { display: block; font-size: 0.75rem; color: var(--dd-text-secondary); margin-bottom: 0.25rem; }
 	.color-input { display: flex; gap: 0.5rem; align-items: center; }
 	.color-input input[type="color"] { width: 36px; height: 36px; border: none; cursor: pointer; background: none; }
 	.color-input input[type="text"] {

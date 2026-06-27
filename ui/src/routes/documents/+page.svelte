@@ -7,23 +7,36 @@
 	let selectedCategory = $state('');
 	let searchQuery = $state('');
 	let loading = $state(true);
+	let loadError = $state('');
 
 	async function loadDocuments() {
 		loading = true;
+		loadError = '';
 		try {
 			const params = selectedCategory ? `?category_id=${selectedCategory}` : '';
 			const res = await api.get<Document[]>(`/documents${params}`);
 			documents = res.data ?? [];
 		} catch {
+			loadError = 'Failed to load documents.';
 			documents = [];
 		}
 		loading = false;
 	}
 
+	// The categories endpoint returns a nested tree; flatten it for the filter dropdown.
+	function flattenCategories(tree: Category[], depth = 0): Category[] {
+		const out: Category[] = [];
+		for (const c of tree) {
+			out.push({ ...c, name: `${'— '.repeat(depth)}${c.name}` });
+			if (c.children?.length) out.push(...flattenCategories(c.children, depth + 1));
+		}
+		return out;
+	}
+
 	async function loadCategories() {
 		try {
 			const res = await api.get<Category[]>('/categories');
-			categories = res.data ?? [];
+			categories = flattenCategories(res.data ?? []);
 		} catch {
 			categories = [];
 		}
@@ -97,6 +110,8 @@
 
 	{#if loading}
 		<div class="loading">Loading documents...</div>
+	{:else if loadError}
+		<div class="empty">{loadError} <button class="link" onclick={loadDocuments}>Retry</button></div>
 	{:else if documents.length === 0}
 		<div class="empty">No documents found.</div>
 	{:else}
@@ -225,6 +240,16 @@
 		color: var(--dd-text);
 		text-decoration: none;
 		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.link {
+		background: none;
+		border: none;
+		color: var(--dd-primary);
+		cursor: pointer;
+		text-decoration: underline;
+		font-size: inherit;
 	}
 
 	.loading, .empty {
