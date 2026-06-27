@@ -37,6 +37,12 @@ func JWTAuth(authSvc *service.AuthService) echo.MiddlewareFunc {
 				return response.Unauthorized(c, "invalid or expired token")
 			}
 
+			// Only access tokens authorize API calls; a refresh token must not be
+			// usable as a bearer token (token-type confusion).
+			if claims.TokenType != service.TokenTypeAccess {
+				return response.Unauthorized(c, "invalid or expired token")
+			}
+
 			// Inject claims into Echo context.
 			c.Set(ContextKeyUserID, claims.UserID)
 			c.Set(ContextKeyEmail, claims.Email)
@@ -77,6 +83,14 @@ func GetUserID(c echo.Context) string {
 // GetUserEmail extracts the user email from the Echo context.
 func GetUserEmail(c echo.Context) string {
 	if v, ok := c.Get(ContextKeyEmail).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// GetUserName extracts the authenticated user's name from the Echo context.
+func GetUserName(c echo.Context) string {
+	if v, ok := c.Get(ContextKeyName).(string); ok {
 		return v
 	}
 	return ""

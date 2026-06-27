@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -9,6 +12,7 @@ import (
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/repository"
+	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
 // AuditLogger writes audit log entries for authenticated requests.
@@ -35,12 +39,14 @@ func (a *AuditLogger) Log(ctx context.Context, entry *domain.AuditEntry) error {
 	if entry.UserEmail == "" {
 		entry.UserEmail = "system"
 	}
+	// Neutralize control characters in all free-text, user-influenced fields so the
+	// audit trail cannot be forged with injected newlines/fake key=value pairs (CWE-117).
 	_, err := a.db.ExecContext(ctx,
 		`INSERT INTO audit_log (id, user_id, user_email, action, resource_type, resource_id, resource_name, details, ip_address, user_agent, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		generateAuditID(), userID, entry.UserEmail, entry.Action,
-		entry.ResourceType, entry.ResourceID, entry.ResourceName, entry.Details,
-		entry.IPAddress, entry.UserAgent, entry.CreatedAt.Format(time.RFC3339),
+		generateAuditID(), userID, sanitize.LogValue(entry.UserEmail), entry.Action,
+		entry.ResourceType, entry.ResourceID, sanitize.LogValue(entry.ResourceName), sanitize.LogValue(entry.Details),
+		entry.IPAddress, sanitize.LogValue(entry.UserAgent), entry.CreatedAt.Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("write audit log: %w", err)
@@ -68,13 +74,13 @@ func (a *AuditLogger) LogFromContext(c echo.Context, action, resourceType, resou
 
 func generateAuditID() string {
 	b := make([]byte, 16)
-	// Time-based prefix for ordering + random suffix for uniqueness.
-	now := time.Now().UnixNano()
-	for i := 0; i < 8; i++ {
-		b[i] = byte(now >> (56 - 8*i))
+	// Time-based prefix preserves rough insertion ordering...
+	binary.BigEndian.PutUint64(b[:8], uint64(time.Now().UnixNano()))
+	// ...and a crypto-random suffix guarantees uniqueness so concurrent writes in
+	// the same nanosecond cannot collide on the audit_log primary key and be dropped.
+	if _, err := rand.Read(b[8:]); err != nil {
+		// Extremely unlikely; fall back to a time-derived suffix.
+		binary.BigEndian.PutUint64(b[8:], uint64(time.Now().UnixNano()))
 	}
-	for i := 8; i < 16; i++ {
-		b[i] = byte(now + int64(i))
-	}
-	return fmt.Sprintf("%x", b)
+	return hex.EncodeToString(b)
 }

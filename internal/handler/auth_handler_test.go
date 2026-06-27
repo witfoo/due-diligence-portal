@@ -35,10 +35,11 @@ func setupHandlerTest(t *testing.T) (*echo.Echo, *AuthHandler, *service.AuthServ
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)
-	authHandler.RegisterRoutes(e, authMW)
+	authHandler.RegisterRoutes(e, authMW, func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 
 	// Create test admin user.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 
 	return e, authHandler, authSvc
 }

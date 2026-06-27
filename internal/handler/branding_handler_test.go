@@ -39,7 +39,8 @@ func setupBrandingHandlerTest(t *testing.T) (*echo.Echo, *BrandingHandler, strin
 	brandingHandler.RegisterRoutes(g)
 
 	// Create test admin user and get token.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 
@@ -97,8 +98,8 @@ func TestBrandingHandler_UploadAsset(t *testing.T) {
 	writer := multipart.NewWriter(&buf)
 	part, err := writer.CreateFormFile("file", "logo.png")
 	require.NoError(t, err)
-	// Write a minimal valid content.
-	_, err = part.Write([]byte("fake-png-data-for-testing"))
+	// Write valid PNG magic bytes so the server's content-type allowlist accepts it.
+	_, err = part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR-test-data"))
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
@@ -142,12 +143,13 @@ func TestBrandingHandler_UploadAsset_InvalidKey(t *testing.T) {
 func TestBrandingHandler_GetAsset(t *testing.T) {
 	e, _, token := setupBrandingHandlerTest(t)
 
-	// Upload first.
+	// Upload first. Use valid PNG magic bytes so the content-type allowlist accepts it.
+	faviconData := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rfavicon-bytes")
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile("file", "favicon.ico")
+	part, err := writer.CreateFormFile("file", "favicon.png")
 	require.NoError(t, err)
-	_, err = part.Write([]byte("favicon-data"))
+	_, err = part.Write(faviconData)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
@@ -165,5 +167,5 @@ func TestBrandingHandler_GetAsset(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "favicon-data", rec.Body.String())
+	assert.Equal(t, string(faviconData), rec.Body.String())
 }

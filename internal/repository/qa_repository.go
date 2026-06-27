@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
@@ -13,10 +14,14 @@ import (
 type QARepository interface {
 	CreateThread(ctx context.Context, thread *domain.QAThread) error
 	GetThread(ctx context.Context, id string) (*domain.QAThread, error)
-	ListThreads(ctx context.Context, status string, limit, offset int) ([]*domain.QAThread, int, error)
+	// ListThreads returns threads, optionally restricted to a status and/or to a
+	// single asker (askedBy != "" scopes results to that user's own threads).
+	ListThreads(ctx context.Context, status, askedBy string, limit, offset int) ([]*domain.QAThread, int, error)
 	UpdateThreadStatus(ctx context.Context, id, status string) error
 	CreateMessage(ctx context.Context, msg *domain.QAMessage) error
-	ListMessages(ctx context.Context, threadID string) ([]*domain.QAMessage, error)
+	// ListMessages returns a thread's messages; when includeInternal is false,
+	// company-internal messages (is_internal = 1) are excluded.
+	ListMessages(ctx context.Context, threadID string, includeInternal bool) ([]*domain.QAMessage, error)
 }
 
 type qaRepository struct {
@@ -76,33 +81,33 @@ func (r *qaRepository) GetThread(ctx context.Context, id string) (*domain.QAThre
 	return &t, nil
 }
 
-func (r *qaRepository) ListThreads(ctx context.Context, status string, limit, offset int) ([]*domain.QAThread, int, error) {
-	// Count total.
-	var total int
-	var countErr error
+func (r *qaRepository) ListThreads(ctx context.Context, status, askedBy string, limit, offset int) ([]*domain.QAThread, int, error) {
+	// Build the WHERE clause from the optional status and askedBy filters.
+	var where []string
+	var args []any
 	if status != "" {
-		countErr = r.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM qa_threads WHERE status = ?`, status).Scan(&total)
-	} else {
-		countErr = r.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM qa_threads`).Scan(&total)
+		where = append(where, "status = ?")
+		args = append(args, status)
 	}
-	if countErr != nil {
-		return nil, 0, fmt.Errorf("count qa threads: %w", countErr)
+	if askedBy != "" {
+		where = append(where, "asked_by = ?")
+		args = append(args, askedBy)
+	}
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = " WHERE " + strings.Join(where, " AND ")
 	}
 
-	// Query rows.
-	var rows *sql.Rows
-	var err error
-	if status != "" {
-		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, subject, document_id, category_id, status, asked_by, assigned_to, created_at, updated_at
-			 FROM qa_threads WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`, status, limit, offset)
-	} else {
-		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, subject, document_id, category_id, status, asked_by, assigned_to, created_at, updated_at
-			 FROM qa_threads ORDER BY created_at DESC LIMIT ? OFFSET ?`, limit, offset)
+	var total int
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM qa_threads"+whereClause, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count qa threads: %w", err)
 	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, subject, document_id, category_id, status, asked_by, assigned_to, created_at, updated_at
+		 FROM qa_threads`+whereClause+` ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+		append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list qa threads: %w", err)
 	}
@@ -163,10 +168,14 @@ func (r *qaRepository) CreateMessage(ctx context.Context, msg *domain.QAMessage)
 	return nil
 }
 
-func (r *qaRepository) ListMessages(ctx context.Context, threadID string) ([]*domain.QAMessage, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, thread_id, author_id, body, is_internal, created_at
-		 FROM qa_messages WHERE thread_id = ? ORDER BY created_at ASC`, threadID)
+func (r *qaRepository) ListMessages(ctx context.Context, threadID string, includeInternal bool) ([]*domain.QAMessage, error) {
+	query := `SELECT id, thread_id, author_id, body, is_internal, created_at
+		 FROM qa_messages WHERE thread_id = ?`
+	if !includeInternal {
+		query += ` AND is_internal = 0`
+	}
+	query += ` ORDER BY created_at ASC`
+	rows, err := r.db.QueryContext(ctx, query, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("list qa messages: %w", err)
 	}

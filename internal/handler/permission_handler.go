@@ -76,6 +76,10 @@ func (h *PermissionHandler) Grant(c echo.Context) error {
 		return response.BadRequest(c, "resource_type must be 'document' or 'category'")
 	}
 
+	if !domain.IsValidAccessLevel(req.AccessLevel) {
+		return response.BadRequest(c, "access_level must be one of view, download, upload, manage")
+	}
+
 	id, err := generateHandlerID()
 	if err != nil {
 		return response.InternalError(c)
@@ -123,6 +127,9 @@ func (h *PermissionHandler) Update(c echo.Context) error {
 
 	if req.AccessLevel == "" {
 		return response.BadRequest(c, "access_level is required")
+	}
+	if !domain.IsValidAccessLevel(req.AccessLevel) {
+		return response.BadRequest(c, "access_level must be one of view, download, upload, manage")
 	}
 
 	grant, err := h.permRepo.GetByID(c.Request().Context(), id)

@@ -29,7 +29,9 @@ func setupAnalyticsHandlerTest(t *testing.T) (*echo.Echo, *AnalyticsHandler, str
 	authSvc := service.NewAuthService(userRepo, testJWTSecret)
 	audit := middleware.NewAuditLogger(db)
 	analyticsRepo := repository.NewAnalyticsRepository(db)
-	analyticsHandler := NewAnalyticsHandler(analyticsRepo, audit)
+	docRepo := repository.NewDocumentRepository(db)
+	permRepo := repository.NewPermissionRepository(db)
+	analyticsHandler := NewAnalyticsHandler(analyticsRepo, docRepo, permRepo, userRepo, audit)
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)
@@ -37,7 +39,8 @@ func setupAnalyticsHandlerTest(t *testing.T) (*echo.Echo, *AnalyticsHandler, str
 	analyticsHandler.RegisterRoutes(g)
 
 	// Create test admin user and get token.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 

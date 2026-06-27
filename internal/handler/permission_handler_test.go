@@ -32,7 +32,8 @@ func setupPermissionTest(t *testing.T) (*echo.Echo, string, string) {
 
 	permRepo := repository.NewPermissionRepository(db)
 
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 
 	// Create an investor user via invite to use as target.
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")

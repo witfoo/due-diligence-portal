@@ -27,7 +27,8 @@
 						role: u.role as 'admin' | 'company_member' | 'investor',
 						is_active: true, created_at: '', updated_at: ''
 					},
-					resp.data.access_token
+					resp.data.access_token,
+					resp.data.refresh_token
 				);
 				window.location.href = '/documents';
 			}

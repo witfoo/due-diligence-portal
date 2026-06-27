@@ -32,7 +32,8 @@ func setupCategoryTest(t *testing.T) (*echo.Echo, string) {
 	catRepo := repository.NewCategoryRepository(db)
 	docRepo := repository.NewDocumentRepository(db)
 
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)

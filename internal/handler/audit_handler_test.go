@@ -37,7 +37,8 @@ func setupAuditHandlerTest(t *testing.T) (*echo.Echo, *AuditHandler, string, *mi
 	auditHandler.RegisterRoutes(g)
 
 	// Create test admin user and get token.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 

@@ -29,7 +29,7 @@ func setupNDAHandlerTest(t *testing.T) (*echo.Echo, *NDAHandler, string) {
 	authSvc := service.NewAuthService(userRepo, testJWTSecret)
 	audit := middleware.NewAuditLogger(db)
 	ndaRepo := repository.NewNDARepository(db)
-	ndaHandler := NewNDAHandler(ndaRepo, audit)
+	ndaHandler := NewNDAHandler(ndaRepo, service.NewEmailService(), "admin@test.com", audit)
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)
@@ -37,7 +37,8 @@ func setupNDAHandlerTest(t *testing.T) (*echo.Echo, *NDAHandler, string) {
 	ndaHandler.RegisterRoutes(g)
 
 	// Create test admin user and get token.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 
@@ -113,7 +114,9 @@ func TestNDAHandler_SignNDA(t *testing.T) {
 	assert.Equal(t, "NDA signed", resp.Message)
 
 	data := resp.Data.(map[string]any)
-	assert.Equal(t, "John Doe", data["signer_name"])
+	// signer_name is bound to the authenticated account (the seeded admin), not the
+	// client-submitted "John Doe", so the signature cannot be attributed to a third party.
+	assert.Equal(t, "Administrator", data["signer_name"])
 	assert.Equal(t, templateID, data["template_id"])
 }
 

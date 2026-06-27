@@ -29,7 +29,8 @@ func setupQAHandlerTest(t *testing.T) (*echo.Echo, *QAHandler, string) {
 	authSvc := service.NewAuthService(userRepo, testJWTSecret)
 	audit := middleware.NewAuditLogger(db)
 	qaRepo := repository.NewQARepository(db)
-	qaHandler := NewQAHandler(qaRepo, audit)
+	permRepo := repository.NewPermissionRepository(db)
+	qaHandler := NewQAHandler(qaRepo, permRepo, userRepo, service.NewEmailService(), audit)
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)
@@ -37,7 +38,8 @@ func setupQAHandlerTest(t *testing.T) (*echo.Echo, *QAHandler, string) {
 	qaHandler.RegisterRoutes(g)
 
 	// Create test admin user and get token.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 	result, err := authSvc.Login(context.Background(), "admin@test.com", "password123")
 	require.NoError(t, err)
 

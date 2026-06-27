@@ -90,6 +90,17 @@ func (h *UserHandler) Update(c echo.Context) error {
 		return response.InternalError(c)
 	}
 
+	// Prevent self-lockout: an admin cannot deactivate or change the role of their
+	// own account via Update (mirrors the self-deactivation guard on DELETE).
+	if middleware.GetUserID(c) == id {
+		if req.IsActive != nil && !*req.IsActive {
+			return response.BadRequest(c, "cannot deactivate your own account")
+		}
+		if req.Role != "" && req.Role != user.Role {
+			return response.BadRequest(c, "cannot change your own role")
+		}
+	}
+
 	if req.Name != "" {
 		user.Name = req.Name
 	}

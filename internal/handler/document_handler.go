@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/middleware"
@@ -18,7 +19,8 @@ import (
 	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
-const defaultMaxUploadSize int64 = 100 * 1024 * 1024 // 100MB
+const defaultMaxUploadSize int64 = 100 * 1024 * 1024     // 100MB
+const absoluteMaxUploadSize int64 = 2 * 1024 * 1024 * 1024 // 2GB sanity cap
 
 // DocumentHandler handles document management endpoints.
 type DocumentHandler struct {
@@ -31,20 +33,35 @@ type DocumentHandler struct {
 // NewDocumentHandler creates a new DocumentHandler.
 func NewDocumentHandler(docRepo repository.DocumentRepository, permRepo repository.PermissionRepository, audit *middleware.AuditLogger) *DocumentHandler {
 	maxSize := envconfig.GetEnvInt64("DD_MAX_UPLOAD_SIZE", defaultMaxUploadSize)
+	if maxSize <= 0 || maxSize > absoluteMaxUploadSize {
+		maxSize = defaultMaxUploadSize
+	}
 	return &DocumentHandler{docRepo: docRepo, permRepo: permRepo, audit: audit, maxUploadSize: maxSize}
 }
 
 // RegisterRoutes registers document routes on a pre-authenticated group.
 func (h *DocumentHandler) RegisterRoutes(g *echo.Group) {
+	// Upload routes get a body limit just above the configured max upload so the
+	// request body is bounded regardless of the client-declared multipart size.
+	uploadLimit := echomw.BodyLimit(fmt.Sprintf("%dB", h.maxUploadSize+1024*1024))
 	g.GET("/documents", h.List)
 	g.GET("/documents/:id", h.Get)
-	g.POST("/documents", h.Upload, middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember))
+	g.POST("/documents", h.Upload, middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember), uploadLimit)
 	g.PUT("/documents/:id", h.Update, middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember))
 	g.DELETE("/documents/:id", h.Archive, middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember))
-	g.POST("/documents/:id/versions", h.UploadVersion, middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember))
+	g.POST("/documents/:id/versions", h.UploadVersion, middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember), uploadLimit)
 	g.GET("/documents/:id/versions/:version", h.DownloadVersion)
 	g.GET("/documents/:id/download", h.Download)
 	g.POST("/documents/search", h.Search)
+}
+
+// canAccessDocument reports whether the current user may access the given document
+// at the required level. Admin and company members have full access; investors must
+// hold a matching grant on the document OR on its category. This is the single
+// authorization helper for every per-document read path.
+func (h *DocumentHandler) canAccessDocument(c echo.Context, doc *domain.Document, level string) (bool, error) {
+	return documentAccessAllowed(c.Request().Context(), h.permRepo,
+		middleware.GetUserID(c), middleware.GetUserRole(c), doc, level)
 }
 
 // List handles GET /documents.
@@ -62,21 +79,24 @@ func (h *DocumentHandler) List(c echo.Context) error {
 			offset = n
 		}
 	}
+	if limit < 1 {
+		limit = 1 // defensive: keep the Page computation below safe from divide-by-zero
+	}
 
 	docs, total, err := h.docRepo.List(c.Request().Context(), categoryID, limit, offset)
 	if err != nil {
 		return response.InternalError(c)
 	}
 
-	// Filter for investors: only show documents they have access grants for.
+	// Filter for investors: only show documents they have a document- or
+	// category-level grant for (the same authorization used by every read path).
 	role := middleware.GetUserRole(c)
-	if role == domain.RoleInvestor {
-		userID := middleware.GetUserID(c)
+	if role != domain.RoleAdmin && role != domain.RoleCompanyMember {
 		var filtered []*domain.Document
 		for _, doc := range docs {
-			hasAccess, err := h.permRepo.HasAccess(c.Request().Context(), userID, domain.ResourceDocument, doc.ID, domain.AccessView)
+			hasAccess, err := h.canAccessDocument(c, doc, domain.AccessView)
 			if err != nil {
-				continue
+				return response.InternalError(c)
 			}
 			if hasAccess {
 				filtered = append(filtered, doc)
@@ -104,6 +124,14 @@ func (h *DocumentHandler) Get(c echo.Context) error {
 			return response.NotFound(c, "document not found")
 		}
 		return response.InternalError(c)
+	}
+
+	// Enforce per-document access. Return 404 (not 403) for ungranted users so the
+	// endpoint does not confirm the existence of documents they cannot see.
+	if ok, err := h.canAccessDocument(c, doc, domain.AccessView); err != nil {
+		return response.InternalError(c)
+	} else if !ok {
+		return response.NotFound(c, "document not found")
 	}
 
 	versions, err := h.docRepo.ListVersions(c.Request().Context(), id)
@@ -153,10 +181,9 @@ func (h *DocumentHandler) Upload(c echo.Context) error {
 	checksum := sha256.Sum256(fileData)
 	checksumHex := hex.EncodeToString(checksum[:])
 	safeFilename := sanitize.FileName(file.Filename)
-	mimeType := file.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = http.DetectContentType(fileData)
-	}
+	// Derive the MIME type from the actual bytes rather than trusting the
+	// client-supplied Content-Type, which is later echoed back on download.
+	mimeType := http.DetectContentType(fileData)
 
 	docID, err := generateHandlerID()
 	if err != nil {
@@ -181,10 +208,6 @@ func (h *DocumentHandler) Upload(c echo.Context) error {
 		Tags:           tags,
 	}
 
-	if err := h.docRepo.Create(c.Request().Context(), doc); err != nil {
-		return response.InternalError(c)
-	}
-
 	version := &domain.DocumentVersion{
 		ID:             versionID,
 		DocumentID:     docID,
@@ -197,7 +220,9 @@ func (h *DocumentHandler) Upload(c echo.Context) error {
 		UploadedBy:     userID,
 	}
 
-	if err := h.docRepo.CreateVersion(c.Request().Context(), version); err != nil {
+	// Insert the document and its first version atomically so a failure cannot
+	// leave an orphan document with no downloadable version.
+	if err := h.docRepo.CreateWithVersion(c.Request().Context(), doc, version); err != nil {
 		return response.InternalError(c)
 	}
 
@@ -303,10 +328,8 @@ func (h *DocumentHandler) UploadVersion(c echo.Context) error {
 
 	checksum := sha256.Sum256(fileData)
 	checksumHex := hex.EncodeToString(checksum[:])
-	mimeType := file.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = http.DetectContentType(fileData)
-	}
+	// Derive MIME from the actual bytes, not the client-supplied Content-Type.
+	mimeType := http.DetectContentType(fileData)
 
 	versionID, err := generateHandlerID()
 	if err != nil {
@@ -314,12 +337,10 @@ func (h *DocumentHandler) UploadVersion(c echo.Context) error {
 	}
 
 	userID := middleware.GetUserID(c)
-	newVersionNum := doc.CurrentVersion + 1
 
 	version := &domain.DocumentVersion{
 		ID:             versionID,
 		DocumentID:     docID,
-		VersionNumber:  newVersionNum,
 		FileData:       fileData,
 		FileSize:       int64(len(fileData)),
 		MimeType:       mimeType,
@@ -328,20 +349,15 @@ func (h *DocumentHandler) UploadVersion(c echo.Context) error {
 		UploadedBy:     userID,
 	}
 
-	if err := h.docRepo.CreateVersion(c.Request().Context(), version); err != nil {
-		return response.InternalError(c)
-	}
-
-	// Update document metadata to reflect new version.
-	doc.CurrentVersion = newVersionNum
-	doc.MimeType = mimeType
-	doc.FileSize = int64(len(fileData))
-	if err := h.docRepo.Update(c.Request().Context(), doc); err != nil {
+	// Insert the version and advance the document pointer atomically. AddVersion
+	// computes the new version number inside the transaction (race-safe) and
+	// updates doc.CurrentVersion / MimeType / FileSize on success.
+	if err := h.docRepo.AddVersion(c.Request().Context(), doc, version); err != nil {
 		return response.InternalError(c)
 	}
 
 	h.audit.LogFromContext(c, domain.AuditDocumentNewVersion, "document", docID, doc.Name,
-		fmt.Sprintf("version=%d", newVersionNum))
+		fmt.Sprintf("version=%d", doc.CurrentVersion))
 
 	return response.Created(c, "New version uploaded", version)
 }
@@ -361,6 +377,12 @@ func (h *DocumentHandler) DownloadVersion(c echo.Context) error {
 			return response.NotFound(c, "document not found")
 		}
 		return response.InternalError(c)
+	}
+
+	if ok, err := h.canAccessDocument(c, doc, domain.AccessDownload); err != nil {
+		return response.InternalError(c)
+	} else if !ok {
+		return response.NotFound(c, "document not found")
 	}
 
 	version, err := h.docRepo.GetVersion(c.Request().Context(), docID, versionNum)
@@ -390,6 +412,12 @@ func (h *DocumentHandler) Download(c echo.Context) error {
 			return response.NotFound(c, "document not found")
 		}
 		return response.InternalError(c)
+	}
+
+	if ok, err := h.canAccessDocument(c, doc, domain.AccessDownload); err != nil {
+		return response.InternalError(c)
+	} else if !ok {
+		return response.NotFound(c, "document not found")
 	}
 
 	version, err := h.docRepo.GetVersion(c.Request().Context(), docID, doc.CurrentVersion)
@@ -425,6 +453,24 @@ func (h *DocumentHandler) Search(c echo.Context) error {
 	docs, total, err := h.docRepo.Search(c.Request().Context(), req.Query, 50, 0)
 	if err != nil {
 		return response.InternalError(c)
+	}
+
+	// Apply the same per-document access filter as List so search cannot be used to
+	// enumerate documents an investor has no grant for.
+	role := middleware.GetUserRole(c)
+	if role != domain.RoleAdmin && role != domain.RoleCompanyMember {
+		var filtered []*domain.Document
+		for _, doc := range docs {
+			hasAccess, err := h.canAccessDocument(c, doc, domain.AccessView)
+			if err != nil {
+				return response.InternalError(c)
+			}
+			if hasAccess {
+				filtered = append(filtered, doc)
+			}
+		}
+		docs = filtered
+		total = len(filtered)
 	}
 
 	return response.OKWithMeta(c, "Search results", docs, &response.Meta{

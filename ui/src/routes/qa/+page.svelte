@@ -7,14 +7,18 @@
 	let filterStatus = $state('');
 	let showNewForm = $state(false);
 	let newSubject = $state('');
+	let loadError = $state('');
+	let formError = $state('');
 
 	async function loadThreads() {
 		loading = true;
+		loadError = '';
 		try {
 			const params = filterStatus ? `?status=${filterStatus}` : '';
 			const res = await api.get<QAThread[]>(`/qa${params}`);
 			threads = res.data ?? [];
 		} catch {
+			loadError = 'Failed to load questions.';
 			threads = [];
 		}
 		loading = false;
@@ -22,13 +26,14 @@
 
 	async function createThread() {
 		if (!newSubject.trim()) return;
+		formError = '';
 		try {
 			await api.post('/qa', { subject: newSubject });
 			newSubject = '';
 			showNewForm = false;
 			await loadThreads();
-		} catch (e) {
-			console.error('Failed to create thread:', e);
+		} catch {
+			formError = 'Failed to create question.';
 		}
 	}
 
@@ -58,6 +63,8 @@
 		</button>
 	</header>
 
+	{#if formError}<div class="error-msg">{formError}</div>{/if}
+
 	{#if showNewForm}
 		<div class="new-form">
 			<input
@@ -81,6 +88,8 @@
 
 	{#if loading}
 		<p class="loading">Loading threads...</p>
+	{:else if loadError}
+		<p class="empty">{loadError} <button class="link" onclick={loadThreads}>Retry</button></p>
 	{:else if threads.length === 0}
 		<p class="empty">No questions yet.</p>
 	{:else}
@@ -192,4 +201,22 @@
 	}
 
 	.loading, .empty { color: var(--dd-text-secondary); text-align: center; padding: 2rem; }
+
+	.error-msg {
+		padding: 0.5rem 1rem;
+		background: #da1e2815;
+		border: 1px solid var(--dd-error, #da1e28);
+		color: var(--dd-error, #da1e28);
+		font-size: 0.875rem;
+		margin-bottom: 1rem;
+	}
+
+	.link {
+		background: none;
+		border: none;
+		color: var(--dd-primary);
+		cursor: pointer;
+		text-decoration: underline;
+		font-size: inherit;
+	}
 </style>

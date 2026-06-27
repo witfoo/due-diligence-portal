@@ -38,7 +38,7 @@ internal/
   domain/                      Domain models + sentinel errors
   middleware/                   JWT auth, RBAC, audit, security headers, rate limit
 pkg/                           envconfig, sanitize (CWE-117), response envelope
-migrations/                    3 SQL files (schema, FTS5, seed categories)
+internal/repository/migrations/ 3 SQL files (schema, FTS5, seed); embedded into the binary
 ui/src/                        Svelte 5 + SvelteKit (adapter-static)
   lib/api/client.ts            Typed API client with JWT
   lib/stores/                  Svelte 5 rune-based stores (.svelte.ts)

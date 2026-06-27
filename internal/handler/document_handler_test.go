@@ -37,7 +37,8 @@ func setupDocumentTest(t *testing.T) (*echo.Echo, *service.AuthService, string) 
 	// Use the seeded "Financials" category (cat-financials) from migration 003.
 
 	// Create admin user.
-	require.NoError(t, authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123"))
+	_, adminErr := authSvc.EnsureAdminExists(context.Background(), "admin@test.com", "password123")
+	require.NoError(t, adminErr)
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)

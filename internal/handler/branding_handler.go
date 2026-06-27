@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 
 	"github.com/labstack/echo/v4"
 
@@ -16,6 +17,10 @@ import (
 )
 
 const maxAssetSize = 2 * 1024 * 1024 // 2MB
+
+// fontFamilyRe restricts font-family values to a conservative charset so they cannot
+// break out of the CSS declaration they are injected into.
+var fontFamilyRe = regexp.MustCompile(`^[A-Za-z0-9 ,'"-]+$`)
 
 // BrandingHandler handles branding endpoints.
 type BrandingHandler struct {
@@ -55,9 +60,35 @@ func (h *BrandingHandler) UpdateConfig(c echo.Context) error {
 		return response.BadRequest(c, "invalid request body")
 	}
 
-	// Sanitize custom CSS.
+	// Validate every color field server-side so an untrusted value cannot break out
+	// of the CSS declaration it is injected into (the client also validates, but the
+	// API must not rely on that).
+	colors := map[string]string{
+		"primary_color": config.PrimaryColor, "secondary_color": config.SecondaryColor,
+		"accent_color": config.AccentColor, "error_color": config.ErrorColor,
+		"warning_color": config.WarningColor, "success_color": config.SuccessColor,
+		"info_color": config.InfoColor, "background_color": config.BackgroundColor,
+		"surface_color": config.SurfaceColor, "text_color": config.TextColor,
+		"text_secondary_color": config.TextSecondaryColor, "border_color": config.BorderColor,
+		"hover_color": config.HoverColor, "active_color": config.ActiveColor,
+		"header_color": config.HeaderColor, "sidebar_color": config.SidebarColor,
+	}
+	for name, val := range colors {
+		if val != "" && !sanitize.IsColor(val) {
+			return response.BadRequest(c, fmt.Sprintf("%s must be a valid CSS color", name))
+		}
+	}
+	if config.FontFamily != "" && !fontFamilyRe.MatchString(config.FontFamily) {
+		return response.BadRequest(c, "font_family contains invalid characters")
+	}
+
+	// Reject custom CSS that contains disallowed patterns rather than silently
+	// mutating it, so the admin gets clear feedback.
 	if config.CustomCSS != "" {
-		sanitized, _ := sanitize.CSS(config.CustomCSS)
+		sanitized, modified := sanitize.CSS(config.CustomCSS)
+		if modified {
+			return response.BadRequest(c, "custom_css contains disallowed content (e.g. @import, url(), expression(), or is too large)")
+		}
 		config.CustomCSS = sanitized
 	}
 
@@ -84,6 +115,10 @@ func (h *BrandingHandler) ResetConfig(c echo.Context) error {
 // GetAsset handles GET /branding/assets/:key.
 func (h *BrandingHandler) GetAsset(c echo.Context) error {
 	key := c.Param("key")
+
+	if !domain.ValidAssetKeys[key] {
+		return response.BadRequest(c, "invalid asset key")
+	}
 
 	asset, err := h.brandingRepo.GetAsset(c.Request().Context(), key)
 	if err != nil {
@@ -124,8 +159,17 @@ func (h *BrandingHandler) UploadAsset(c echo.Context) error {
 		return response.InternalError(c)
 	}
 
-	// Detect content type.
+	// Detect content type from the bytes and allow only raster images. SVG is
+	// excluded because it is active content (can carry <script>/onload) and is served
+	// back same-origin; restricting to raster types removes that stored-XSS vector.
 	mimeType := http.DetectContentType(data)
+	allowedAssetTypes := map[string]bool{
+		"image/png": true, "image/jpeg": true, "image/gif": true,
+		"image/webp": true, "image/x-icon": true, "image/vnd.microsoft.icon": true, "image/bmp": true,
+	}
+	if !allowedAssetTypes[mimeType] {
+		return response.BadRequest(c, "unsupported asset type; allowed: PNG, JPEG, GIF, WEBP, BMP, ICO")
+	}
 
 	// Compute checksum.
 	checksum := fmt.Sprintf("%x", sha256.Sum256(data))
@@ -156,6 +200,10 @@ func (h *BrandingHandler) UploadAsset(c echo.Context) error {
 // DeleteAsset handles DELETE /branding/assets/:key.
 func (h *BrandingHandler) DeleteAsset(c echo.Context) error {
 	key := c.Param("key")
+
+	if !domain.ValidAssetKeys[key] {
+		return response.BadRequest(c, "invalid asset key")
+	}
 
 	if err := h.brandingRepo.DeleteAsset(c.Request().Context(), key); err != nil {
 		if err == domain.ErrDocumentNotFound {

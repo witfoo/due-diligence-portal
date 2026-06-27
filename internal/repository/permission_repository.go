@@ -36,9 +36,16 @@ func (r *permissionRepository) Grant(ctx context.Context, grant *domain.AccessGr
 		s := grant.ExpiresAt.UTC().Format(time.RFC3339)
 		expiresAt = &s
 	}
+	// Upsert: re-granting on a resource the user already has a grant for updates the
+	// access level (the common "upgrade view to download") instead of failing the
+	// UNIQUE(user_id, resource_type, resource_id) constraint with an opaque 500.
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO access_grants (id, user_id, resource_type, resource_id, access_level, granted_by, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id, resource_type, resource_id)
+		 DO UPDATE SET access_level = excluded.access_level,
+		               granted_by   = excluded.granted_by,
+		               expires_at   = excluded.expires_at`,
 		grant.ID, grant.UserID, grant.ResourceType, grant.ResourceID,
 		grant.AccessLevel, grant.GrantedBy, expiresAt, now,
 	)

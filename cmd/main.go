@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -48,6 +49,8 @@ func main() {
 	httpPort := envconfig.GetEnv("DD_HTTP_PORT", "8080")
 	httpsPort := envconfig.GetEnv("DD_HTTPS_PORT", "8443")
 	tlsMode := envconfig.GetEnv("DD_TLS_MODE", "self-signed")
+	devMode := envconfig.GetEnvBool("DD_DEV_MODE", false)
+	maxUploadSize := envconfig.GetEnvInt64("DD_MAX_UPLOAD_SIZE", 100*1024*1024)
 
 	// --- Database ---
 	db, err := repository.New(dbPath)
@@ -65,9 +68,23 @@ func main() {
 	e.HideBanner = true
 	e.HidePort = true
 
+	// Client IP extraction. By default trust only the direct TCP peer so that
+	// X-Forwarded-For/X-Real-IP cannot be spoofed to evade rate limiting or to
+	// poison audit/NDA IP records. Enable DD_TRUST_PROXY only when running behind
+	// a trusted reverse proxy that sets XFF.
+	if envconfig.GetEnvBool("DD_TRUST_PROXY", false) {
+		e.IPExtractor = echo.ExtractIPFromXFFHeader()
+	} else {
+		e.IPExtractor = echo.ExtractIPDirect()
+	}
+
 	// Global middleware.
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
+	// Absolute body-size backstop: large enough for the configured max upload plus
+	// multipart overhead, small enough to prevent unbounded-body memory exhaustion.
+	// Tighter limits are applied to the pre-auth credential endpoints below.
+	e.Use(echomw.BodyLimit(fmt.Sprintf("%dB", maxUploadSize+16*1024*1024)))
 	e.Use(middleware.SecurityHeaders())
 	e.Use(echomw.RequestLoggerWithConfig(echomw.RequestLoggerConfig{
 		LogURI:      true,
@@ -86,15 +103,32 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(rateLimit, time.Minute)
 	e.Use(rateLimiter.Middleware())
 
-	// CORS for development.
-	e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
-	}))
+	// Stricter throttle for the unauthenticated credential endpoints to resist
+	// online brute-force / credential-stuffing.
+	loginLimit := envconfig.GetEnvInt("DD_LOGIN_RATE_LIMIT", 10)
+	loginLimiter := middleware.NewRateLimiter(loginLimit, time.Minute)
+	loginThrottle := loginLimiter.Middleware()
+
+	// CORS is disabled by default (the UI is served same-origin). Set
+	// DD_CORS_ORIGINS to a comma-separated allowlist to enable cross-origin access;
+	// the wildcard "*" is never combined with the Authorization header by default.
+	if corsOrigins := envconfig.GetEnvList("DD_CORS_ORIGINS", nil); len(corsOrigins) > 0 {
+		e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
+			AllowOrigins: corsOrigins,
+			AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
+			AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		}))
+	}
 
 	// --- Services ---
-	jwtSecret := envconfig.GetEnv("DD_JWT_SECRET", "dev-secret-change-in-production-32chars")
+	jwtSecret := envconfig.GetEnv("DD_JWT_SECRET", service.DefaultJWTSecret)
+	// Refuse to run with a missing, default, or weak signing secret outside dev mode:
+	// HS256 is symmetric and the default value is public in source control, so using
+	// it in production is a complete authentication bypass.
+	if !devMode && (jwtSecret == "" || jwtSecret == service.DefaultJWTSecret || len(jwtSecret) < 32) {
+		log.Fatalf("[FATAL] DD_JWT_SECRET must be set to a non-default value of at least 32 bytes " +
+			"(set DD_DEV_MODE=true to bypass for local development)")
+	}
 	userRepo := repository.NewUserRepository(db)
 	authSvc := service.NewAuthService(userRepo, jwtSecret)
 	auditLogger := middleware.NewAuditLogger(db)
@@ -102,8 +136,21 @@ func main() {
 	// Ensure initial admin user exists.
 	adminEmail := envconfig.GetEnv("DD_ADMIN_EMAIL", "admin@localhost")
 	adminPassword := envconfig.GetEnv("DD_ADMIN_PASSWORD", "")
-	if err := authSvc.EnsureAdminExists(context.Background(), adminEmail, adminPassword); err != nil {
+	generatedPw, err := authSvc.EnsureAdminExists(context.Background(), adminEmail, adminPassword)
+	if err != nil {
 		log.Printf("[WARN] Failed to ensure admin exists: %v", err)
+	}
+	if generatedPw != "" {
+		// Never log the credential. Write it once to a restricted file so it is not
+		// persisted to the application/Docker log stream (CWE-532).
+		pwFile := envconfig.GetEnv("DD_ADMIN_PASSWORD_FILE", filepath.Join(filepath.Dir(dbPath), "initial-admin-password.txt"))
+		if werr := os.WriteFile(pwFile, []byte(generatedPw+"\n"), 0o600); werr != nil {
+			log.Printf("[WARN] Generated an initial admin password but could not write %s: %v "+
+				"(set DD_ADMIN_PASSWORD to provide one explicitly)", pwFile, werr)
+		} else {
+			log.Printf("[INFO] Generated initial admin password written to %s (mode 0600). "+
+				"Log in and change it immediately, then delete the file.", pwFile)
+		}
 	}
 
 	// --- Auth Middleware ---
@@ -134,7 +181,7 @@ func main() {
 	healthHandler.RegisterRoutes(e)
 
 	authHandler := handler.NewAuthHandler(authSvc, auditLogger)
-	authHandler.RegisterRoutes(e, authMW)
+	authHandler.RegisterRoutes(e, authMW, loginThrottle)
 
 	// Route groups.
 	adminGroup := e.Group("/api/v1", authMW, adminOnly)
@@ -157,7 +204,7 @@ func main() {
 	permHandler.RegisterRoutes(adminGroup)
 
 	// Q&A.
-	qaHandler := handler.NewQAHandler(qaRepo, auditLogger)
+	qaHandler := handler.NewQAHandler(qaRepo, permRepo, userRepo, emailSvc, auditLogger)
 	qaHandler.RegisterRoutes(authGroup)
 
 	// Audit log (admin only).
@@ -165,7 +212,7 @@ func main() {
 	auditHandler.RegisterRoutes(adminGroup)
 
 	// Analytics.
-	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, auditLogger)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, docRepo, permRepo, userRepo, auditLogger)
 	analyticsHandler.RegisterRoutes(authGroup)
 
 	// Branding.
@@ -173,7 +220,7 @@ func main() {
 	brandingHandler.RegisterRoutes(authGroup)
 
 	// NDA.
-	ndaHandler := handler.NewNDAHandler(ndaRepo, auditLogger)
+	ndaHandler := handler.NewNDAHandler(ndaRepo, emailSvc, adminEmail, auditLogger)
 	ndaHandler.RegisterRoutes(authGroup)
 
 	// Watermark (admin only).
@@ -291,18 +338,32 @@ func ensureSelfSignedCert(certDir string) (certPath, keyPath string, err error) 
 		return "", "", fmt.Errorf("generate serial number: %w", err)
 	}
 
+	// Populate the Subject CN and SANs from DD_TLS_HOSTNAME so the self-signed cert
+	// is valid for the actual deployment host, not just localhost.
+	hostname := envconfig.GetEnv("DD_TLS_HOSTNAME", "localhost")
+	dnsNames := []string{"localhost"}
+	var ipAddrs []net.IP
+	if hostname != "" && hostname != "localhost" {
+		if ip := net.ParseIP(hostname); ip != nil {
+			ipAddrs = append(ipAddrs, ip)
+		} else {
+			dnsNames = append(dnsNames, hostname)
+		}
+	}
+
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{"Due Diligence Portal"},
-			CommonName:   "localhost",
+			CommonName:   hostname,
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{"localhost"},
+		DNSNames:              dnsNames,
+		IPAddresses:           ipAddrs,
 	}
 
 	// Create certificate.

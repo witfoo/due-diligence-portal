@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -19,15 +20,30 @@ const (
 	bcryptCost         = 12
 	accessTokenExpiry  = 15 * time.Minute
 	refreshTokenExpiry = 7 * 24 * time.Hour
+	tokenIssuer        = "dd-portal"
+
+	// TokenTypeAccess and TokenTypeRefresh distinguish the two token classes so a
+	// refresh token cannot be replayed as an access token (and vice-versa).
+	TokenTypeAccess  = "access"
+	TokenTypeRefresh = "refresh"
+
+	// DefaultJWTSecret is the development fallback secret. The server refuses to use
+	// it outside dev mode (see cmd/main.go) because it is public in source control.
+	DefaultJWTSecret = "dev-secret-change-in-production-32chars"
 )
+
+// dummyHash is a precomputed bcrypt hash used to equalize Login timing when the
+// account is unknown or disabled, preventing user-enumeration via response time.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("timing-equalization-placeholder"), bcryptCost)
 
 // JWTClaims contains the custom claims for portal JWT tokens.
 type JWTClaims struct {
 	jwt.RegisteredClaims
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	Name   string `json:"name"`
-	Role   string `json:"role"`
+	UserID    string `json:"user_id"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	TokenType string `json:"token_type"`
 }
 
 // AuthService handles authentication and token management.
@@ -52,26 +68,34 @@ type LoginResult struct {
 }
 
 // Login authenticates a user with email and password.
+//
+// Timing is equalized across the unknown-user, wrong-password, and disabled-account
+// paths: a bcrypt comparison always runs (against a dummy hash when the user is
+// missing), and the disabled-account status is only revealed after a correct
+// password, so neither response content nor latency leaks account existence.
 func (s *AuthService) Login(ctx context.Context, email, password string) (*LoginResult, error) {
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
+		// Spend equivalent time so a missing account is indistinguishable from a wrong password.
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		return nil, domain.ErrInvalidCredentials
-	}
-
-	if !user.IsActive {
-		return nil, domain.ErrAccountDisabled
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	accessToken, err := s.generateToken(user, accessTokenExpiry)
+	// Only reveal disabled status to a caller who proved the correct password.
+	if !user.IsActive {
+		return nil, domain.ErrAccountDisabled
+	}
+
+	accessToken, err := s.generateToken(user, accessTokenExpiry, TokenTypeAccess)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	refreshToken, err := s.generateToken(user, refreshTokenExpiry)
+	refreshToken, err := s.generateToken(user, refreshTokenExpiry, TokenTypeRefresh)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -113,6 +137,13 @@ func (s *AuthService) Register(ctx context.Context, token, name, password string
 		return nil, fmt.Errorf("generate user ID: %w", err)
 	}
 
+	// Consume the token first (atomic compare-and-swap). This closes the TOCTOU
+	// where two concurrent registrations both pass the UsedAt check above: only one
+	// wins MarkInviteTokenUsed, the other gets ErrTokenUsed.
+	if err := s.userRepo.MarkInviteTokenUsed(ctx, token); err != nil {
+		return nil, err
+	}
+
 	user := &domain.User{
 		ID:           userID,
 		Email:        invite.Email,
@@ -127,17 +158,19 @@ func (s *AuthService) Register(ctx context.Context, token, name, password string
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	if err := s.userRepo.MarkInviteTokenUsed(ctx, token); err != nil {
-		fmt.Printf("[WARN] Failed to mark invite token used: %v\n", err)
-	}
-
 	return s.Login(ctx, user.Email, password)
 }
 
 // RefreshToken generates a new access token from a valid refresh token.
+// It rejects access tokens (only a token minted as a refresh token is accepted),
+// preventing token-type confusion.
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (string, error) {
 	claims, err := s.ValidateToken(refreshToken)
 	if err != nil {
+		return "", domain.ErrUnauthorized
+	}
+
+	if claims.TokenType != TokenTypeRefresh {
 		return "", domain.ErrUnauthorized
 	}
 
@@ -150,17 +183,22 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		return "", domain.ErrAccountDisabled
 	}
 
-	return s.generateToken(user, accessTokenExpiry)
+	return s.generateToken(user, accessTokenExpiry, TokenTypeAccess)
 }
 
-// ValidateToken parses and validates a JWT token.
+// ValidateToken parses and validates a JWT token. It enforces the HS256 algorithm,
+// a required and verified expiry, and the expected issuer.
 func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return s.jwtSecret, nil
-	})
+	},
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithIssuer(tokenIssuer),
+		jwt.WithExpirationRequired(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("parse token: %w", err)
 	}
@@ -180,6 +218,11 @@ func (s *AuthService) CreateInvite(ctx context.Context, email, role, invitedBy s
 	}
 	if err := domain.ValidateRole(role); err != nil {
 		return nil, err
+	}
+	// Only non-admin roles can be invited (matches the invite_tokens CHECK
+	// constraint); admins must be provisioned out-of-band, not via self-service invite.
+	if role == domain.RoleAdmin {
+		return nil, domain.ErrInvalidRole
 	}
 
 	tokenStr, err := generateToken()
@@ -208,33 +251,37 @@ func (s *AuthService) CreateInvite(ctx context.Context, email, role, invitedBy s
 	return invite, nil
 }
 
-// EnsureAdminExists creates the initial admin user if no users exist.
-func (s *AuthService) EnsureAdminExists(ctx context.Context, email, password string) error {
+// EnsureAdminExists creates the initial admin user if no users exist. When no
+// password is supplied it generates a random one and RETURNS it (generated != "")
+// so the caller can surface it securely (e.g. write to a 0600 file) — it is never
+// written to the application log stream, which would persist the credential
+// in cleartext (CWE-532).
+func (s *AuthService) EnsureAdminExists(ctx context.Context, email, password string) (generated string, err error) {
 	count, err := s.userRepo.Count(ctx)
 	if err != nil {
-		return fmt.Errorf("count users: %w", err)
+		return "", fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
-		return nil
+		return "", nil
 	}
 
 	if password == "" {
 		raw := make([]byte, 16)
 		if _, err := rand.Read(raw); err != nil {
-			return fmt.Errorf("generate random password: %w", err)
+			return "", fmt.Errorf("generate random password: %w", err)
 		}
 		password = hex.EncodeToString(raw)
-		fmt.Printf("[INFO] Generated admin password: %s\n", password)
+		generated = password
 	}
 
 	hash, err := HashPassword(password)
 	if err != nil {
-		return fmt.Errorf("hash password: %w", err)
+		return "", fmt.Errorf("hash password: %w", err)
 	}
 
 	id, err := generateID()
 	if err != nil {
-		return fmt.Errorf("generate ID: %w", err)
+		return "", fmt.Errorf("generate ID: %w", err)
 	}
 
 	admin := &domain.User{
@@ -247,25 +294,26 @@ func (s *AuthService) EnsureAdminExists(ctx context.Context, email, password str
 	}
 
 	if err := s.userRepo.Create(ctx, admin); err != nil {
-		return fmt.Errorf("create admin: %w", err)
+		return "", fmt.Errorf("create admin: %w", err)
 	}
 
-	fmt.Printf("[INFO] Admin user created: %s\n", email)
-	return nil
+	log.Printf("[INFO] Admin user created: %s", email)
+	return generated, nil
 }
 
-func (s *AuthService) generateToken(user *domain.User, expiry time.Duration) (string, error) {
+func (s *AuthService) generateToken(user *domain.User, expiry time.Duration, tokenType string) (string, error) {
 	now := time.Now()
 	claims := &JWTClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
 			IssuedAt:  jwt.NewNumericDate(now),
-			Issuer:    "dd-portal",
+			Issuer:    tokenIssuer,
 		},
-		UserID: user.ID,
-		Email:  user.Email,
-		Name:   user.Name,
-		Role:   user.Role,
+		UserID:    user.ID,
+		Email:     user.Email,
+		Name:      user.Name,
+		Role:      user.Role,
+		TokenType: tokenType,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
