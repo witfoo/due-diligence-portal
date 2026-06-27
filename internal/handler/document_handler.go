@@ -19,7 +19,7 @@ import (
 	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
-const defaultMaxUploadSize int64 = 100 * 1024 * 1024     // 100MB
+const defaultMaxUploadSize int64 = 100 * 1024 * 1024       // 100MB
 const absoluteMaxUploadSize int64 = 2 * 1024 * 1024 * 1024 // 2GB sanity cap
 
 // DocumentHandler handles document management endpoints.
