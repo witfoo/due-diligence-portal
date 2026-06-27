@@ -14,6 +14,38 @@ merged into distinct issues.
 
 ---
 
+## ✅ Remediation status (branch `fix/audit-remediation`)
+
+All findings below have been **remediated** across 4 commits. Verification is green end-to-end:
+`go build/vet/test` all pass; UI `svelte-check` 0 errors / 0 warnings, `eslint` clean, `vitest` 10/10,
+`npm run build` succeeds. A live smoke test confirmed the headline fixes:
+
+- **Upload → list → download → search** all work (the reported 404 is fixed by the new `documents/upload` page;
+  download now uses an authenticated fetch instead of a bare `<a href>`).
+- **IDOR (C4) closed:** an investor with no grant gets `404` on `GET/Download/DownloadVersion` and `0` results in
+  list/search; after an admin grants access, `200` and the document appears. Category-level grants are honored.
+- **Auth hardening:** server fatally refuses to boot with the default/weak `DD_JWT_SECRET` (exit 1); a refresh
+  token is rejected as an access token and vice-versa (token-type confusion closed); the generated initial admin
+  password is written to a `0600` file, never to the logs.
+- **FTS search** no longer 500s on special characters (`"`, `(`, `OR`, …) — returns `200`.
+
+**Intentional follow-ups (not regressions; require product/infra decisions, noted inline where relevant):**
+- Token storage remains `localStorage` (H11): refresh-token rotation/clearing was added, but moving the session to
+  an `HttpOnly` cookie is a larger backend change left for a follow-up. Mitigated by short (15 min) access TTL +
+  validated branding CSS (removes the main injection amplifier).
+- Logout is client-side only (L18): both tokens are cleared, but there is no server-side JWT revocation list
+  (stateless JWT). Mitigated by short access TTL + refresh-token clearing.
+- Watermark application (H8): documents are still served unaltered; rendering a watermark onto PDF/image bytes is a
+  feature requiring an air-gapped rendering library. The fix here was to stop the UI from over-claiming; actual
+  watermarking is a follow-up.
+- Email notifications (M16): NDA-signed → admin and Q&A staff-reply → asker are now wired (best-effort). The
+  new-document notification and the `notification_preferences` table (L14) remain unimplemented pending a decision
+  on recipients/preferences.
+
+The findings as originally written are preserved below for the record.
+
+---
+
 ## Executive summary
 
 | Severity | Count | Theme |
