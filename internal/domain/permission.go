@@ -16,6 +16,16 @@ const (
 	ResourceDocument = "document"
 )
 
+// validAccessLevels is the set of accepted access levels.
+var validAccessLevels = map[string]bool{
+	AccessView: true, AccessDownload: true, AccessUpload: true, AccessManage: true,
+}
+
+// IsValidAccessLevel reports whether level is one of the accepted access levels.
+func IsValidAccessLevel(level string) bool {
+	return validAccessLevels[level]
+}
+
 // AccessGrant represents a permission grant on a resource.
 type AccessGrant struct {
 	ID           string     `json:"id"`

@@ -88,6 +88,14 @@ func GetUserEmail(c echo.Context) string {
 	return ""
 }
 
+// GetUserName extracts the authenticated user's name from the Echo context.
+func GetUserName(c echo.Context) string {
+	if v, ok := c.Get(ContextKeyName).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // GetUserRole extracts the user role from the Echo context.
 func GetUserRole(c echo.Context) string {
 	if v, ok := c.Get(ContextKeyRole).(string); ok {

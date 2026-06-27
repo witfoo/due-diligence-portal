@@ -51,7 +51,7 @@ func TestPermissionRepository_Grant(t *testing.T) {
 	assert.False(t, grant.CreatedAt.IsZero())
 }
 
-func TestPermissionRepository_Grant_Duplicate(t *testing.T) {
+func TestPermissionRepository_Grant_Upsert(t *testing.T) {
 	db := setupTestDB(t)
 	granterID, granteeID := seedPermissionDeps(t, db)
 	repo := NewPermissionRepository(db)
@@ -66,9 +66,15 @@ func TestPermissionRepository_Grant_Duplicate(t *testing.T) {
 		ResourceID: "cat-corporate", AccessLevel: domain.AccessDownload, GrantedBy: granterID,
 	}
 
+	// Re-granting the same user+resource upserts the access level rather than failing
+	// the UNIQUE constraint (lets admins upgrade view -> download).
 	require.NoError(t, repo.Grant(ctx, g1))
-	err := repo.Grant(ctx, g2)
-	assert.Error(t, err, "duplicate user+resource grant should fail")
+	require.NoError(t, repo.Grant(ctx, g2))
+
+	grants, err := repo.ListByUser(ctx, granteeID)
+	require.NoError(t, err)
+	require.Len(t, grants, 1, "upsert must not create a second row")
+	assert.Equal(t, domain.AccessDownload, grants[0].AccessLevel)
 }
 
 func TestPermissionRepository_GetByID(t *testing.T) {

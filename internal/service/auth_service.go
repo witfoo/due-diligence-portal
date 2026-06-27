@@ -137,6 +137,13 @@ func (s *AuthService) Register(ctx context.Context, token, name, password string
 		return nil, fmt.Errorf("generate user ID: %w", err)
 	}
 
+	// Consume the token first (atomic compare-and-swap). This closes the TOCTOU
+	// where two concurrent registrations both pass the UsedAt check above: only one
+	// wins MarkInviteTokenUsed, the other gets ErrTokenUsed.
+	if err := s.userRepo.MarkInviteTokenUsed(ctx, token); err != nil {
+		return nil, err
+	}
+
 	user := &domain.User{
 		ID:           userID,
 		Email:        invite.Email,
@@ -149,10 +156,6 @@ func (s *AuthService) Register(ctx context.Context, token, name, password string
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
-	}
-
-	if err := s.userRepo.MarkInviteTokenUsed(ctx, token); err != nil {
-		fmt.Printf("[WARN] Failed to mark invite token used: %v\n", err)
 	}
 
 	return s.Login(ctx, user.Email, password)
@@ -215,6 +218,11 @@ func (s *AuthService) CreateInvite(ctx context.Context, email, role, invitedBy s
 	}
 	if err := domain.ValidateRole(role); err != nil {
 		return nil, err
+	}
+	// Only non-admin roles can be invited (matches the invite_tokens CHECK
+	// constraint); admins must be provisioned out-of-band, not via self-service invite.
+	if role == domain.RoleAdmin {
+		return nil, domain.ErrInvalidRole
 	}
 
 	tokenStr, err := generateToken()

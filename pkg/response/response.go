@@ -19,13 +19,15 @@ type Response struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// Meta contains pagination metadata.
+// Meta contains pagination metadata. None of these fields use omitempty: a zero
+// total, first page, or has_more=false are all meaningful values that the client
+// needs to compute pagination, so they must always be present in the envelope.
 type Meta struct {
 	Count    int  `json:"count"`
-	Total    int  `json:"total,omitempty"`
-	Page     int  `json:"page,omitempty"`
-	PageSize int  `json:"page_size,omitempty"`
-	HasMore  bool `json:"has_more,omitempty"`
+	Total    int  `json:"total"`
+	Page     int  `json:"page"`
+	PageSize int  `json:"page_size"`
+	HasMore  bool `json:"has_more"`
 }
 
 // ErrorDetail provides structured error information.

@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"encoding/csv"
+	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -26,8 +29,40 @@ func NewAuditHandler(auditRepo repository.AuditRepository, audit *middleware.Aud
 func (h *AuditHandler) RegisterRoutes(g *echo.Group) {
 	admin := g.Group("", middleware.RequireRole(domain.RoleAdmin))
 	admin.GET("/audit", h.List)
+	admin.GET("/audit/export", h.Export)
 	admin.GET("/audit/document/:id", h.GetByDocument)
 	admin.GET("/audit/user/:id", h.GetByUser)
+}
+
+// Export handles GET /audit/export, streaming the (optionally filtered) audit log
+// as CSV for offline evidence/review.
+func (h *AuditHandler) Export(c echo.Context) error {
+	filter := repository.AuditFilter{
+		Action:       c.QueryParam("action"),
+		UserID:       c.QueryParam("user_id"),
+		ResourceType: c.QueryParam("resource_type"),
+	}
+
+	const exportLimit = 10000
+	entries, _, err := h.auditRepo.List(c.Request().Context(), filter, exportLimit, 0)
+	if err != nil {
+		return response.InternalError(c)
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, "text/csv; charset=utf-8")
+	c.Response().Header().Set(echo.HeaderContentDisposition, `attachment; filename="audit-log.csv"`)
+	c.Response().WriteHeader(http.StatusOK)
+
+	w := csv.NewWriter(c.Response().Writer)
+	defer w.Flush()
+	_ = w.Write([]string{"created_at", "user_email", "action", "resource_type", "resource_id", "resource_name", "details", "ip_address"})
+	for _, e := range entries {
+		_ = w.Write([]string{
+			e.CreatedAt.Format(time.RFC3339), e.UserEmail, e.Action, e.ResourceType,
+			e.ResourceID, e.ResourceName, e.Details, e.IPAddress,
+		})
+	}
+	return nil
 }
 
 // List handles GET /audit.

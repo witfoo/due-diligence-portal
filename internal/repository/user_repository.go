@@ -172,12 +172,23 @@ func (r *userRepository) GetInviteToken(ctx context.Context, token string) (*dom
 	return &it, nil
 }
 
+// MarkInviteTokenUsed atomically consumes an unused invite token. The conditional
+// UPDATE (used_at IS NULL) makes consumption a compare-and-swap: only one concurrent
+// caller can win, and a second attempt returns ErrTokenUsed instead of silently
+// re-marking an already-used token.
 func (r *userRepository) MarkInviteTokenUsed(ctx context.Context, token string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE invite_tokens SET used_at = ? WHERE token = ?`, now, token)
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE invite_tokens SET used_at = ? WHERE token = ? AND used_at IS NULL`, now, token)
 	if err != nil {
 		return fmt.Errorf("mark invite token used: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("mark invite token used rows affected: %w", err)
+	}
+	if rows == 0 {
+		return domain.ErrTokenUsed
 	}
 	return nil
 }

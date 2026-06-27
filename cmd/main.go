@@ -204,7 +204,7 @@ func main() {
 	permHandler.RegisterRoutes(adminGroup)
 
 	// Q&A.
-	qaHandler := handler.NewQAHandler(qaRepo, permRepo, auditLogger)
+	qaHandler := handler.NewQAHandler(qaRepo, permRepo, userRepo, emailSvc, auditLogger)
 	qaHandler.RegisterRoutes(authGroup)
 
 	// Audit log (admin only).
@@ -220,7 +220,7 @@ func main() {
 	brandingHandler.RegisterRoutes(authGroup)
 
 	// NDA.
-	ndaHandler := handler.NewNDAHandler(ndaRepo, auditLogger)
+	ndaHandler := handler.NewNDAHandler(ndaRepo, emailSvc, adminEmail, auditLogger)
 	ndaHandler.RegisterRoutes(authGroup)
 
 	// Watermark (admin only).

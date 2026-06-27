@@ -30,7 +30,7 @@ func setupQAHandlerTest(t *testing.T) (*echo.Echo, *QAHandler, string) {
 	audit := middleware.NewAuditLogger(db)
 	qaRepo := repository.NewQARepository(db)
 	permRepo := repository.NewPermissionRepository(db)
-	qaHandler := NewQAHandler(qaRepo, permRepo, audit)
+	qaHandler := NewQAHandler(qaRepo, permRepo, userRepo, service.NewEmailService(), audit)
 
 	e := echo.New()
 	authMW := middleware.JWTAuth(authSvc)

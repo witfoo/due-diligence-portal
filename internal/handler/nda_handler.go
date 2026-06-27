@@ -1,23 +1,30 @@
 package handler
 
 import (
+	"log"
+
 	"github.com/labstack/echo/v4"
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/middleware"
 	"github.com/witfoo/due-diligence-portal/internal/repository"
+	"github.com/witfoo/due-diligence-portal/internal/service"
 	"github.com/witfoo/due-diligence-portal/pkg/response"
+	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
 // NDAHandler handles NDA endpoints.
 type NDAHandler struct {
-	ndaRepo repository.NDARepository
-	audit   *middleware.AuditLogger
+	ndaRepo    repository.NDARepository
+	emailSvc   *service.EmailService
+	adminEmail string
+	audit      *middleware.AuditLogger
 }
 
-// NewNDAHandler creates a new NDAHandler.
-func NewNDAHandler(ndaRepo repository.NDARepository, audit *middleware.AuditLogger) *NDAHandler {
-	return &NDAHandler{ndaRepo: ndaRepo, audit: audit}
+// NewNDAHandler creates a new NDAHandler. adminEmail receives NDA-signed
+// notifications (best-effort, only when SMTP is enabled).
+func NewNDAHandler(ndaRepo repository.NDARepository, emailSvc *service.EmailService, adminEmail string, audit *middleware.AuditLogger) *NDAHandler {
+	return &NDAHandler{ndaRepo: ndaRepo, emailSvc: emailSvc, adminEmail: adminEmail, audit: audit}
 }
 
 // RegisterRoutes registers NDA routes on the given group.
@@ -171,13 +178,16 @@ func (h *NDAHandler) Sign(c echo.Context) error {
 		return response.BadRequest(c, "signer_name is required")
 	}
 
-	// Verify template exists.
+	// Verify template exists and is active (signing a retired template is meaningless).
 	tmpl, err := h.ndaRepo.GetTemplate(c.Request().Context(), templateID)
 	if err != nil {
 		if err == domain.ErrTemplateNotFound {
 			return response.NotFound(c, "template not found")
 		}
 		return response.InternalError(c)
+	}
+	if !tmpl.IsActive {
+		return response.BadRequest(c, "template is not active")
 	}
 
 	userID := middleware.GetUserID(c)
@@ -196,11 +206,19 @@ func (h *NDAHandler) Sign(c echo.Context) error {
 		return response.InternalError(c)
 	}
 
+	// Bind the signer identity to the authenticated account rather than trusting a
+	// client-supplied name; fall back to the submitted name only if the account has
+	// no name on record. user_id and email are always the authenticated values.
+	signerName := middleware.GetUserName(c)
+	if signerName == "" {
+		signerName = req.SignerName
+	}
+
 	sig := &domain.NDASignature{
 		ID:            id,
 		TemplateID:    templateID,
 		UserID:        userID,
-		SignerName:    req.SignerName,
+		SignerName:    signerName,
 		SignerEmail:   middleware.GetUserEmail(c),
 		SignerCompany: req.SignerCompany,
 		IPAddress:     c.RealIP(),
@@ -210,7 +228,14 @@ func (h *NDAHandler) Sign(c echo.Context) error {
 		return response.InternalError(c)
 	}
 
-	h.audit.LogFromContext(c, domain.AuditNDASigned, "nda_template", tmpl.ID, tmpl.Name, "signer="+req.SignerName)
+	h.audit.LogFromContext(c, domain.AuditNDASigned, "nda_template", tmpl.ID, tmpl.Name, "signer="+signerName)
+
+	// Best-effort notify the admin that an NDA was signed (no-op when SMTP disabled).
+	if h.emailSvc != nil && h.adminEmail != "" {
+		if err := h.emailSvc.SendNDASignedNotification(h.adminEmail, signerName, sig.SignerEmail, tmpl.Name); err != nil {
+			log.Printf("[WARN] Failed to send NDA-signed notification: %v", sanitize.LogValue(err.Error()))
+		}
+	}
 
 	return response.Created(c, "NDA signed", sig)
 }

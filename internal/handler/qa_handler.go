@@ -2,25 +2,30 @@ package handler
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/middleware"
 	"github.com/witfoo/due-diligence-portal/internal/repository"
+	"github.com/witfoo/due-diligence-portal/internal/service"
 	"github.com/witfoo/due-diligence-portal/pkg/response"
+	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
 // QAHandler handles Q&A endpoints.
 type QAHandler struct {
 	qaRepo   repository.QARepository
 	permRepo repository.PermissionRepository
+	userRepo repository.UserRepository
+	emailSvc *service.EmailService
 	audit    *middleware.AuditLogger
 }
 
 // NewQAHandler creates a new QAHandler.
-func NewQAHandler(qaRepo repository.QARepository, permRepo repository.PermissionRepository, audit *middleware.AuditLogger) *QAHandler {
-	return &QAHandler{qaRepo: qaRepo, permRepo: permRepo, audit: audit}
+func NewQAHandler(qaRepo repository.QARepository, permRepo repository.PermissionRepository, userRepo repository.UserRepository, emailSvc *service.EmailService, audit *middleware.AuditLogger) *QAHandler {
+	return &QAHandler{qaRepo: qaRepo, permRepo: permRepo, userRepo: userRepo, emailSvc: emailSvc, audit: audit}
 }
 
 // isPrivileged reports whether the role is staff (admin or company member), which
@@ -213,6 +218,17 @@ func (h *QAHandler) PostMessage(c echo.Context) error {
 
 	h.audit.LogFromContext(c, domain.AuditQAMessagePosted, "qa_thread", threadID, thread.Subject,
 		fmt.Sprintf("internal=%t", isInternal))
+
+	// Best-effort: notify the asker when staff post a non-internal reply on their
+	// thread (no-op when SMTP is disabled).
+	if h.emailSvc != nil && privileged && !isInternal && thread.AskedBy != middleware.GetUserID(c) {
+		if asker, err := h.userRepo.GetByID(c.Request().Context(), thread.AskedBy); err == nil && asker.Email != "" {
+			authorName := middleware.GetUserName(c)
+			if err := h.emailSvc.SendQANotification(asker.Email, thread.Subject, thread.Subject, authorName, req.Body); err != nil {
+				log.Printf("[WARN] Failed to send Q&A notification: %v", sanitize.LogValue(err.Error()))
+			}
+		}
+	}
 
 	return response.Created(c, "Message posted", msg)
 }
