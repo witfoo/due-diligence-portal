@@ -59,9 +59,12 @@ func (r *categoryRepository) GetBySlug(ctx context.Context, slug string) (*domai
 }
 
 func (r *categoryRepository) List(ctx context.Context) ([]*domain.Category, error) {
+	// Include a per-category count of non-archived documents so list/filter views
+	// can show how many documents each category holds and hide empty ones.
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, slug, description, parent_id, sort_order, icon, created_at, updated_at
-		 FROM categories ORDER BY sort_order, name`)
+		`SELECT c.id, c.name, c.slug, c.description, c.parent_id, c.sort_order, c.icon, c.created_at, c.updated_at,
+		        (SELECT COUNT(*) FROM documents d WHERE d.category_id = c.id AND d.is_archived = 0) AS document_count
+		 FROM categories c ORDER BY c.sort_order, c.name`)
 	if err != nil {
 		return nil, fmt.Errorf("list categories: %w", err)
 	}
@@ -69,13 +72,39 @@ func (r *categoryRepository) List(ctx context.Context) ([]*domain.Category, erro
 
 	var cats []*domain.Category
 	for rows.Next() {
-		c, err := r.scanCategoryRow(rows)
+		c, err := r.scanCategoryRowWithCount(rows)
 		if err != nil {
 			return nil, err
 		}
 		cats = append(cats, c)
 	}
 	return cats, rows.Err()
+}
+
+// scanCategoryRowWithCount scans a category row that includes the document_count
+// column appended by List.
+func (r *categoryRepository) scanCategoryRowWithCount(row scannable) (*domain.Category, error) {
+	var c domain.Category
+	var description, icon, parentID sql.NullString
+	var createdAt, updatedAt string
+
+	err := row.Scan(&c.ID, &c.Name, &c.Slug, &description, &parentID, &c.SortOrder, &icon,
+		&createdAt, &updatedAt, &c.DocumentCount)
+	if err != nil {
+		return nil, fmt.Errorf("scan category row: %w", err)
+	}
+	if description.Valid {
+		c.Description = description.String
+	}
+	if parentID.Valid {
+		c.ParentID = &parentID.String
+	}
+	if icon.Valid {
+		c.Icon = icon.String
+	}
+	c.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	c.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	return &c, nil
 }
 
 func (r *categoryRepository) ListAsTree(ctx context.Context) ([]*domain.Category, error) {
@@ -126,30 +155,6 @@ func (r *categoryRepository) scanCategory(row *sql.Row) (*domain.Category, error
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan category: %w", err)
-	}
-	if description.Valid {
-		c.Description = description.String
-	}
-	if parentID.Valid {
-		c.ParentID = &parentID.String
-	}
-	if icon.Valid {
-		c.Icon = icon.String
-	}
-	c.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	c.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-	return &c, nil
-}
-
-func (r *categoryRepository) scanCategoryRow(row scannable) (*domain.Category, error) {
-	var c domain.Category
-	var description, icon sql.NullString
-	var parentID sql.NullString
-	var createdAt, updatedAt string
-
-	err := row.Scan(&c.ID, &c.Name, &c.Slug, &description, &parentID, &c.SortOrder, &icon, &createdAt, &updatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("scan category row: %w", err)
 	}
 	if description.Valid {
 		c.Description = description.String
