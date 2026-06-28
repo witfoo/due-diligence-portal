@@ -29,10 +29,35 @@ func NewUserHandler(userRepo repository.UserRepository, authSvc *service.AuthSer
 // RegisterRoutes registers user management routes.
 func (h *UserHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/users", h.List)
+	g.GET("/users/invites", h.ListInvites)
+	g.DELETE("/users/invites/:id", h.RevokeInvite)
 	g.GET("/users/:id", h.Get)
 	g.PUT("/users/:id", h.Update)
 	g.DELETE("/users/:id", h.Deactivate)
 	g.POST("/users/invite", h.Invite)
+}
+
+// ListInvites handles GET /api/v1/users/invites — pending (unaccepted, unexpired)
+// invitations, so admins can see who has been invited but not yet registered.
+func (h *UserHandler) ListInvites(c echo.Context) error {
+	invites, err := h.userRepo.ListPendingInvites(c.Request().Context())
+	if err != nil {
+		return response.InternalError(c)
+	}
+	return response.OK(c, "Pending invitations retrieved", invites)
+}
+
+// RevokeInvite handles DELETE /api/v1/users/invites/:id.
+func (h *UserHandler) RevokeInvite(c echo.Context) error {
+	id := c.Param("id")
+	if err := h.userRepo.DeleteInviteToken(c.Request().Context(), id); err != nil {
+		if err == domain.ErrTokenNotFound {
+			return response.NotFound(c, "invitation not found")
+		}
+		return response.InternalError(c)
+	}
+	h.audit.LogFromContext(c, domain.AuditUserInvited, "invite", id, "", "revoked")
+	return response.OK(c, "Invitation revoked", nil)
 }
 
 // List handles GET /api/v1/users.

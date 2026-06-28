@@ -25,13 +25,14 @@ func NewAuditHandler(auditRepo repository.AuditRepository, audit *middleware.Aud
 	return &AuditHandler{auditRepo: auditRepo, audit: audit}
 }
 
-// RegisterRoutes registers audit routes (admin-only group).
+// RegisterRoutes registers audit routes. The activity log is available to admins
+// and company members (staff); investors cannot see it.
 func (h *AuditHandler) RegisterRoutes(g *echo.Group) {
-	admin := g.Group("", middleware.RequireRole(domain.RoleAdmin))
-	admin.GET("/audit", h.List)
-	admin.GET("/audit/export", h.Export)
-	admin.GET("/audit/document/:id", h.GetByDocument)
-	admin.GET("/audit/user/:id", h.GetByUser)
+	staff := g.Group("", middleware.RequireRole(domain.RoleAdmin, domain.RoleCompanyMember))
+	staff.GET("/audit", h.List)
+	staff.GET("/audit/export", h.Export)
+	staff.GET("/audit/document/:id", h.GetByDocument)
+	staff.GET("/audit/user/:id", h.GetByUser)
 }
 
 // Export handles GET /audit/export, streaming the (optionally filtered) audit log

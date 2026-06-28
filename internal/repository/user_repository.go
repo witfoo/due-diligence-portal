@@ -23,6 +23,8 @@ type UserRepository interface {
 	CreateInviteToken(ctx context.Context, token *domain.InviteToken) error
 	GetInviteToken(ctx context.Context, token string) (*domain.InviteToken, error)
 	MarkInviteTokenUsed(ctx context.Context, token string) error
+	ListPendingInvites(ctx context.Context) ([]*domain.InviteToken, error)
+	DeleteInviteToken(ctx context.Context, id string) error
 }
 
 type userRepository struct {
@@ -189,6 +191,52 @@ func (r *userRepository) MarkInviteTokenUsed(ctx context.Context, token string) 
 	}
 	if rows == 0 {
 		return domain.ErrTokenUsed
+	}
+	return nil
+}
+
+// ListPendingInvites returns invitations that have not yet been accepted and have
+// not expired, most recent first, so admins can see who has been invited but has
+// not completed registration.
+func (r *userRepository) ListPendingInvites(ctx context.Context) ([]*domain.InviteToken, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, token, email, role, invited_by, expires_at, used_at, created_at
+		 FROM invite_tokens
+		 WHERE used_at IS NULL AND expires_at > ?
+		 ORDER BY created_at DESC`, now)
+	if err != nil {
+		return nil, fmt.Errorf("list pending invites: %w", err)
+	}
+	defer rows.Close()
+
+	var invites []*domain.InviteToken
+	for rows.Next() {
+		var it domain.InviteToken
+		var expiresAt, createdAt string
+		var usedAt sql.NullString
+		if err := rows.Scan(&it.ID, &it.Token, &it.Email, &it.Role, &it.InvitedBy, &expiresAt, &usedAt, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan invite token row: %w", err)
+		}
+		it.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAt)
+		it.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		invites = append(invites, &it)
+	}
+	return invites, rows.Err()
+}
+
+// DeleteInviteToken revokes a pending invitation by id.
+func (r *userRepository) DeleteInviteToken(ctx context.Context, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM invite_tokens WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete invite token (id=%s): %w", id, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete invite token rows affected: %w", err)
+	}
+	if rows == 0 {
+		return domain.ErrTokenNotFound
 	}
 	return nil
 }

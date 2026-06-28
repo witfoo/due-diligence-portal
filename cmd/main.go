@@ -207,9 +207,9 @@ func main() {
 	qaHandler := handler.NewQAHandler(qaRepo, permRepo, userRepo, emailSvc, auditLogger)
 	qaHandler.RegisterRoutes(authGroup)
 
-	// Audit log (admin only).
+	// Audit log / activity (admins + company members; role enforced in the handler).
 	auditHandler := handler.NewAuditHandler(auditRepo, auditLogger)
-	auditHandler.RegisterRoutes(adminGroup)
+	auditHandler.RegisterRoutes(authGroup)
 
 	// Analytics.
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo, docRepo, permRepo, userRepo, auditLogger)

@@ -14,6 +14,17 @@ export interface User {
 	updated_at: string;
 }
 
+export interface InviteToken {
+	id: string;
+	token: string;
+	email: string;
+	role: 'admin' | 'company_member' | 'investor';
+	invited_by: string;
+	expires_at: string;
+	used_at?: string;
+	created_at: string;
+}
+
 export interface Document {
 	id: string;
 	name: string;
@@ -54,6 +65,7 @@ export interface Category {
 	created_at: string;
 	updated_at: string;
 	children?: Category[];
+	document_count?: number;
 }
 
 export interface AccessGrant {

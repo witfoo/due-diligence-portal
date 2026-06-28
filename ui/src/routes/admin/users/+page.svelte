@@ -1,9 +1,10 @@
 <script lang="ts">
-	import type { User } from '$types/api';
+	import type { User, InviteToken } from '$types/api';
 	import { api } from '$api/client';
 	import { authStore } from '$stores/authStore.svelte';
 
 	let users = $state<User[]>([]);
+	let invites = $state<InviteToken[]>([]);
 	let loading = $state(true);
 	let loadError = $state('');
 	let showInvite = $state(false);
@@ -26,6 +27,29 @@
 		loading = false;
 	}
 
+	async function loadInvites() {
+		try {
+			const res = await api.get<InviteToken[]>('/users/invites');
+			invites = res.data ?? [];
+		} catch {
+			invites = [];
+		}
+	}
+
+	function registerLink(token: string): string {
+		return `${window.location.origin}/register?token=${token}`;
+	}
+
+	async function revokeInvite(id: string) {
+		actionError = '';
+		try {
+			await api.delete(`/users/invites/${id}`);
+			await loadInvites();
+		} catch {
+			actionError = 'Failed to revoke invitation.';
+		}
+	}
+
 	async function sendInvite(e: Event) {
 		e.preventDefault();
 		if (!inviteEmail.trim()) return;
@@ -41,6 +65,7 @@
 				inviteLink = `${window.location.origin}/register?token=${res.data.token}`;
 				inviteEmail = '';
 				showInvite = false;
+				await loadInvites();
 				await loadUsers();
 			}
 		} catch {
@@ -76,7 +101,7 @@
 		});
 	}
 
-	$effect(() => { loadUsers(); });
+	$effect(() => { loadUsers(); loadInvites(); });
 </script>
 
 <h1>Users</h1>
@@ -104,6 +129,29 @@
 		</select>
 		<button class="btn-primary" type="submit">Send Invite</button>
 	</form>
+{/if}
+
+{#if invites.length > 0}
+	<section class="invites">
+		<h2>Pending Invitations ({invites.length})</h2>
+		<p class="hint">These people have been invited but haven't registered yet. Share the registration link with them.</p>
+		<table>
+			<thead>
+				<tr><th>Email</th><th>Role</th><th>Expires</th><th>Registration link</th><th>Actions</th></tr>
+			</thead>
+			<tbody>
+				{#each invites as inv}
+					<tr>
+						<td>{inv.email}</td>
+						<td><span class="role-badge">{inv.role.replace('_', ' ')}</span></td>
+						<td>{formatDate(inv.expires_at)}</td>
+						<td class="link-cell">{registerLink(inv.token)}</td>
+						<td><button class="btn-small danger" onclick={() => revokeInvite(inv.id)}>Revoke</button></td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</section>
 {/if}
 
 {#if loading}
@@ -265,5 +313,9 @@
 		font-size: inherit;
 	}
 	.muted { color: var(--dd-text-secondary); }
+	.invites { margin-bottom: 2rem; }
+	.invites h2 { font-weight: 400; font-size: 1.125rem; margin-bottom: 0.25rem; }
+	.hint { font-size: 0.8125rem; color: var(--dd-text-secondary); margin-bottom: 0.75rem; }
+	.link-cell { font-family: monospace; font-size: 0.75rem; word-break: break-all; color: var(--dd-primary); }
 	.loading, .empty { color: var(--dd-text-secondary); text-align: center; padding: 2rem; }
 </style>

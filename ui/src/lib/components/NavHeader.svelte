@@ -16,6 +16,7 @@
 		{ href: '/documents', label: 'Documents' },
 		{ href: '/qa', label: 'Q&A' },
 		...(showAnalytics ? [{ href: '/analytics', label: 'Analytics' }] : []),
+		...(showAnalytics ? [{ href: '/activity', label: 'Activity' }] : []),
 		...(showAdmin ? [{ href: '/admin/users', label: 'Admin' }] : [])
 	]);
 

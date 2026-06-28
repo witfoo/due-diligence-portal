@@ -50,4 +50,8 @@ type Category struct {
 
 	// Computed field for tree rendering.
 	Children []*Category `json:"children,omitempty"`
+
+	// DocumentCount is the number of non-archived documents directly in this
+	// category (populated by the repository for list views).
+	DocumentCount int `json:"document_count"`
 }
