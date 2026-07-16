@@ -73,9 +73,13 @@ All responses use the standard envelope:
 | GET | `/nda/templates` | Yes | Admin | List templates |
 | POST | `/nda/templates` | Yes | Admin | Create template |
 | PUT | `/nda/templates/:id` | Yes | Admin | Update template |
-| GET | `/nda/status` | Yes | All | Check signing status |
+| GET | `/nda/status` | Yes | All | Check signing status (`signed`; `exempt: true` when waived) |
 | POST | `/nda/sign/:templateId` | Yes | All | Sign NDA |
 | GET | `/nda/signatures` | Yes | Admin | List all signatures |
+| GET | `/nda/exemptions` | Yes | Admin | List NDA exemptions |
+| POST | `/nda/exemptions` | Yes | Admin | Grant exemption (multipart: `user_id`, optional `reason`, optional `file` — externally executed NDA, max 25MB). Re-granting replaces the exemption. |
+| DELETE | `/nda/exemptions/:userId` | Yes | Admin | Revoke exemption |
+| GET | `/nda/exemptions/:userId/document` | Yes | Admin | Download the uploaded executed NDA |
 
 ## Audit
 

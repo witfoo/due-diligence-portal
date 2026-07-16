@@ -38,7 +38,7 @@ internal/
   domain/                      Domain models + sentinel errors
   middleware/                   JWT auth, RBAC, audit, security headers, rate limit
 pkg/                           envconfig, sanitize (CWE-117), response envelope
-internal/repository/migrations/ 3 SQL files (schema, FTS5, seed); embedded into the binary
+internal/repository/migrations/ 4 SQL files (schema, FTS5, seed, NDA exemptions); embedded into the binary
 ui/src/                        Svelte 5 + SvelteKit (adapter-static)
   lib/api/client.ts            Typed API client with JWT
   lib/stores/                  Svelte 5 rune-based stores (.svelte.ts)
@@ -71,5 +71,6 @@ SQLite WAL mode. Schema in `internal/repository/migrations/`:
 - `001_initial_schema.sql` — 16 tables (users, documents, document_versions, categories, access_grants, audit_log, qa_threads, qa_messages, nda_templates, nda_signatures, branding_config, branding_assets, view_events, watermark_config, notification_preferences, invite_tokens)
 - `002_fts_indexes.sql` — FTS5 full-text search with sync triggers
 - `003_seed_categories.sql` — 10 due diligence categories + singleton configs
+- `004_nda_exemptions.sql` — per-user NDA waivers with optional externally executed NDA document (BLOB)
 
 Migrations are idempotent (`IF NOT EXISTS` / `INSERT OR IGNORE`), run on every boot.

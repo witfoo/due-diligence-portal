@@ -157,6 +157,20 @@ export interface NDATemplate {
 	updated_at: string;
 }
 
+export interface NDAExemption {
+	user_id: string;
+	reason?: string;
+	file_name?: string;
+	mime_type?: string;
+	file_size?: number;
+	granted_by: string;
+	created_at: string;
+	user_name?: string;
+	user_email?: string;
+	granted_by_name?: string;
+	has_document: boolean;
+}
+
 export interface NDASignature {
 	id: string;
 	template_id: string;

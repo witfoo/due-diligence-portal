@@ -1,15 +1,23 @@
 <script lang="ts">
-	import type { NDATemplate, NDASignature } from '$types/api';
+	import type { NDATemplate, NDASignature, NDAExemption, User } from '$types/api';
 	import { api } from '$api/client';
 
 	let templates = $state<NDATemplate[]>([]);
 	let signatures = $state<NDASignature[]>([]);
+	let exemptions = $state<NDAExemption[]>([]);
+	let users = $state<User[]>([]);
 	let loading = $state(true);
 	let showCreate = $state(false);
 	let showSignatures = $state(false);
+	let showExemptions = $state(false);
+	let showGrantForm = $state(false);
 	let newName = $state('');
 	let newContent = $state('');
 	let message = $state('');
+	let exemptUserId = $state('');
+	let exemptReason = $state('');
+	let exemptFile = $state<FileList | null>(null);
+	let granting = $state(false);
 
 	async function loadTemplates() {
 		loading = true;
@@ -57,6 +65,73 @@
 		if (showSignatures) loadSignatures();
 	}
 
+	async function loadExemptions() {
+		try {
+			const res = await api.get<NDAExemption[]>('/nda/exemptions');
+			exemptions = res.data ?? [];
+		} catch {
+			exemptions = [];
+		}
+	}
+
+	async function loadUsers() {
+		try {
+			const res = await api.get<User[]>('/users');
+			users = res.data ?? [];
+		} catch {
+			users = [];
+		}
+	}
+
+	function toggleExemptions() {
+		showExemptions = !showExemptions;
+		if (showExemptions) {
+			loadExemptions();
+			loadUsers();
+		}
+	}
+
+	async function grantExemption() {
+		if (!exemptUserId) return;
+		message = '';
+		granting = true;
+		try {
+			const form = new FormData();
+			form.append('user_id', exemptUserId);
+			if (exemptReason.trim()) form.append('reason', exemptReason.trim());
+			if (exemptFile && exemptFile.length > 0) form.append('file', exemptFile[0]);
+			await api.upload('/nda/exemptions', form);
+			exemptUserId = '';
+			exemptReason = '';
+			exemptFile = null;
+			showGrantForm = false;
+			message = 'NDA exemption granted.';
+			await loadExemptions();
+		} catch {
+			message = 'Failed to grant exemption.';
+		}
+		granting = false;
+	}
+
+	async function revokeExemption(ex: NDAExemption) {
+		message = '';
+		try {
+			await api.delete(`/nda/exemptions/${ex.user_id}`);
+			message = 'NDA exemption revoked.';
+			await loadExemptions();
+		} catch {
+			message = 'Failed to revoke exemption.';
+		}
+	}
+
+	async function downloadExemptionDocument(ex: NDAExemption) {
+		try {
+			await api.download(`/nda/exemptions/${ex.user_id}/document`, ex.file_name ?? 'nda.pdf');
+		} catch {
+			message = 'Failed to download document.';
+		}
+	}
+
 	$effect(() => { loadTemplates(); });
 </script>
 
@@ -68,6 +143,9 @@
 	</button>
 	<button class="btn-secondary" onclick={toggleSignatures}>
 		{showSignatures ? 'Hide Signatures' : 'View Signatures'}
+	</button>
+	<button class="btn-secondary" onclick={toggleExemptions}>
+		{showExemptions ? 'Hide Exemptions' : 'Manage Exemptions'}
 	</button>
 </div>
 
@@ -144,6 +222,86 @@
 	{/if}
 {/if}
 
+{#if showExemptions}
+	<h2>Exemptions</h2>
+	<p class="hint">
+		Exempt users bypass the click-through NDA requirement. Optionally attach an
+		externally executed NDA (e.g. a countersigned PDF) as evidence.
+	</p>
+
+	<div class="actions">
+		<button class="btn-primary" onclick={() => (showGrantForm = !showGrantForm)}>
+			{showGrantForm ? 'Cancel' : 'Grant Exemption'}
+		</button>
+	</div>
+
+	{#if showGrantForm}
+		<div class="create-form">
+			<label>
+				User
+				<select bind:value={exemptUserId}>
+					<option value="" disabled>Select a user…</option>
+					{#each users as user}
+						<option value={user.id}>{user.name} ({user.email}) — {user.role}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				Reason (optional)
+				<input type="text" placeholder="e.g. NDA executed externally on 2026-07-01" bind:value={exemptReason} />
+			</label>
+			<label>
+				Executed NDA document (optional)
+				<input type="file" bind:files={exemptFile} />
+			</label>
+			<button class="btn-primary" onclick={grantExemption} disabled={!exemptUserId || granting}>
+				{granting ? 'Granting…' : 'Grant Exemption'}
+			</button>
+		</div>
+	{/if}
+
+	{#if exemptions.length === 0}
+		<p class="empty">No exemptions granted.</p>
+	{:else}
+		<table>
+			<thead>
+				<tr>
+					<th>User</th>
+					<th>Email</th>
+					<th>Reason</th>
+					<th>Document</th>
+					<th>Granted By</th>
+					<th>Granted</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each exemptions as ex}
+					<tr>
+						<td>{ex.user_name ?? ex.user_id}</td>
+						<td>{ex.user_email ?? ''}</td>
+						<td>{ex.reason ?? ''}</td>
+						<td>
+							{#if ex.has_document}
+								<button class="btn-link" onclick={() => downloadExemptionDocument(ex)}>
+									{ex.file_name ?? 'Download'}
+								</button>
+							{:else}
+								<span class="muted">None</span>
+							{/if}
+						</td>
+						<td>{ex.granted_by_name ?? ex.granted_by}</td>
+						<td>{formatDate(ex.created_at)}</td>
+						<td>
+							<button class="btn-danger" onclick={() => revokeExemption(ex)}>Revoke</button>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	{/if}
+{/if}
+
 <style>
 	h1 { font-weight: 400; font-size: 1.5rem; margin-bottom: 1.5rem; }
 	h2 { font-weight: 400; font-size: 1.125rem; margin-top: 2rem; margin-bottom: 1rem; color: var(--dd-text-secondary); }
@@ -197,6 +355,46 @@
 	}
 
 	.create-form textarea { font-family: monospace; }
+
+	.create-form label {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		font-size: 0.75rem;
+		color: var(--dd-text-secondary);
+	}
+
+	.create-form select {
+		padding: 0.5rem 0.75rem;
+		background: var(--dd-background);
+		border: 1px solid var(--dd-border);
+		color: var(--dd-text);
+		font-size: 0.8125rem;
+	}
+
+	.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.btn-link {
+		background: none;
+		border: none;
+		padding: 0;
+		color: var(--dd-primary);
+		cursor: pointer;
+		font-size: 0.8125rem;
+		text-decoration: underline;
+	}
+
+	.btn-danger {
+		padding: 0.25rem 0.75rem;
+		background: transparent;
+		color: var(--dd-danger, #da1e28);
+		border: 1px solid var(--dd-danger, #da1e28);
+		cursor: pointer;
+		font-size: 0.75rem;
+	}
+
+	.hint { font-size: 0.8125rem; color: var(--dd-text-secondary); margin-bottom: 1rem; }
+	.muted { color: var(--dd-text-secondary); }
 
 	table { width: 100%; border-collapse: collapse; }
 

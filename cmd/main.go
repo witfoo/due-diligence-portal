@@ -220,7 +220,7 @@ func main() {
 	brandingHandler.RegisterRoutes(authGroup)
 
 	// NDA.
-	ndaHandler := handler.NewNDAHandler(ndaRepo, emailSvc, adminEmail, auditLogger)
+	ndaHandler := handler.NewNDAHandler(ndaRepo, userRepo, emailSvc, adminEmail, auditLogger)
 	ndaHandler.RegisterRoutes(authGroup)
 
 	// Watermark (admin only).

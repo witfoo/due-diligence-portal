@@ -31,9 +31,11 @@ const (
 	AuditQAClosed        = "qa.closed"
 	AuditQAMessagePosted = "qa.message_posted"
 
-	AuditNDASigned  = "nda.signed"
-	AuditNDACreated = "nda.created"
-	AuditNDAUpdated = "nda.updated"
+	AuditNDASigned           = "nda.signed"
+	AuditNDACreated          = "nda.created"
+	AuditNDAUpdated          = "nda.updated"
+	AuditNDAExemptionGranted = "nda.exemption_granted"
+	AuditNDAExemptionRevoked = "nda.exemption_revoked"
 
 	AuditBrandingUpdated = "branding.updated"
 	AuditBrandingReset   = "branding.reset"

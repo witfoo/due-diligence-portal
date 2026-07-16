@@ -217,3 +217,104 @@ func TestNDARepository_HasSigned(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, signed)
 }
+
+func TestNDARepository_UpsertExemption(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewNDARepository(db)
+	ctx := context.Background()
+
+	createTestUser(t, db, "investor1", "investor@test.com")
+	createTestUser(t, db, "admin1", "admin@test.com")
+
+	ex := &domain.NDAExemption{
+		UserID:    "investor1",
+		Reason:    "NDA executed externally",
+		GrantedBy: "admin1",
+	}
+	require.NoError(t, repo.UpsertExemption(ctx, ex))
+	assert.False(t, ex.CreatedAt.IsZero())
+	assert.False(t, ex.HasDocument)
+
+	exempt, err := repo.IsExempt(ctx, "investor1")
+	require.NoError(t, err)
+	assert.True(t, exempt)
+
+	// Re-granting replaces the existing exemption (now with a document).
+	replacement := &domain.NDAExemption{
+		UserID:    "investor1",
+		Reason:    "Countersigned paper NDA on file",
+		FileName:  "nda-signed.pdf",
+		MimeType:  "application/pdf",
+		FileSize:  4,
+		FileData:  []byte("%PDF"),
+		GrantedBy: "admin1",
+	}
+	require.NoError(t, repo.UpsertExemption(ctx, replacement))
+
+	got, err := repo.GetExemptionDocument(ctx, "investor1")
+	require.NoError(t, err)
+	assert.Equal(t, "Countersigned paper NDA on file", got.Reason)
+	assert.Equal(t, "nda-signed.pdf", got.FileName)
+	assert.Equal(t, []byte("%PDF"), got.FileData)
+	assert.True(t, got.HasDocument)
+}
+
+func TestNDARepository_ListExemptions(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewNDARepository(db)
+	ctx := context.Background()
+
+	createTestUser(t, db, "investor1", "investor@test.com")
+	createTestUser(t, db, "admin1", "admin@test.com")
+
+	require.NoError(t, repo.UpsertExemption(ctx, &domain.NDAExemption{
+		UserID: "investor1", Reason: "external NDA",
+		FileName: "nda.pdf", MimeType: "application/pdf",
+		FileSize: 4, FileData: []byte("%PDF"), GrantedBy: "admin1",
+	}))
+
+	exemptions, err := repo.ListExemptions(ctx)
+	require.NoError(t, err)
+	require.Len(t, exemptions, 1)
+
+	ex := exemptions[0]
+	assert.Equal(t, "investor1", ex.UserID)
+	assert.Equal(t, "investor@test.com", ex.UserEmail)
+	assert.Equal(t, "Test User", ex.UserName)
+	assert.Equal(t, "Test User", ex.GrantedByName)
+	assert.True(t, ex.HasDocument)
+	assert.Equal(t, int64(4), ex.FileSize)
+	// List must never carry the blob itself.
+	assert.Nil(t, ex.FileData)
+}
+
+func TestNDARepository_DeleteExemption(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewNDARepository(db)
+	ctx := context.Background()
+
+	createTestUser(t, db, "investor1", "investor@test.com")
+	createTestUser(t, db, "admin1", "admin@test.com")
+
+	require.NoError(t, repo.UpsertExemption(ctx, &domain.NDAExemption{
+		UserID: "investor1", GrantedBy: "admin1",
+	}))
+
+	require.NoError(t, repo.DeleteExemption(ctx, "investor1"))
+
+	exempt, err := repo.IsExempt(ctx, "investor1")
+	require.NoError(t, err)
+	assert.False(t, exempt)
+
+	// Deleting again reports not found.
+	assert.ErrorIs(t, repo.DeleteExemption(ctx, "investor1"), domain.ErrExemptionNotFound)
+}
+
+func TestNDARepository_GetExemptionDocument_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewNDARepository(db)
+	ctx := context.Background()
+
+	_, err := repo.GetExemptionDocument(ctx, "nonexistent")
+	assert.ErrorIs(t, err, domain.ErrExemptionNotFound)
+}

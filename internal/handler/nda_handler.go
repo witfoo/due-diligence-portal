@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 
 	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/middleware"
@@ -13,9 +17,14 @@ import (
 	"github.com/witfoo/due-diligence-portal/pkg/sanitize"
 )
 
+// maxExemptionUploadSize caps the externally executed NDA document upload.
+// Signed NDAs are small (scanned PDFs at most), so a fixed 25MB cap suffices.
+const maxExemptionUploadSize int64 = 25 * 1024 * 1024
+
 // NDAHandler handles NDA endpoints.
 type NDAHandler struct {
 	ndaRepo    repository.NDARepository
+	userRepo   repository.UserRepository
 	emailSvc   *service.EmailService
 	adminEmail string
 	audit      *middleware.AuditLogger
@@ -23,13 +32,14 @@ type NDAHandler struct {
 
 // NewNDAHandler creates a new NDAHandler. adminEmail receives NDA-signed
 // notifications (best-effort, only when SMTP is enabled).
-func NewNDAHandler(ndaRepo repository.NDARepository, emailSvc *service.EmailService, adminEmail string, audit *middleware.AuditLogger) *NDAHandler {
-	return &NDAHandler{ndaRepo: ndaRepo, emailSvc: emailSvc, adminEmail: adminEmail, audit: audit}
+func NewNDAHandler(ndaRepo repository.NDARepository, userRepo repository.UserRepository, emailSvc *service.EmailService, adminEmail string, audit *middleware.AuditLogger) *NDAHandler {
+	return &NDAHandler{ndaRepo: ndaRepo, userRepo: userRepo, emailSvc: emailSvc, adminEmail: adminEmail, audit: audit}
 }
 
 // RegisterRoutes registers NDA routes on the given group.
 func (h *NDAHandler) RegisterRoutes(g *echo.Group) {
 	adminOnly := middleware.RequireRole(domain.RoleAdmin)
+	uploadLimit := echomw.BodyLimit(fmt.Sprintf("%dB", maxExemptionUploadSize+1024*1024))
 	g.GET("/nda/templates", h.ListTemplates, adminOnly)
 	g.POST("/nda/templates", h.CreateTemplate, adminOnly)
 	g.PUT("/nda/templates/:id", h.UpdateTemplate, adminOnly)
@@ -37,6 +47,10 @@ func (h *NDAHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/nda/active", h.ActiveTemplate)
 	g.POST("/nda/sign/:templateId", h.Sign)
 	g.GET("/nda/signatures", h.ListSignatures, adminOnly)
+	g.GET("/nda/exemptions", h.ListExemptions, adminOnly)
+	g.POST("/nda/exemptions", h.GrantExemption, adminOnly, uploadLimit)
+	g.DELETE("/nda/exemptions/:userId", h.RevokeExemption, adminOnly)
+	g.GET("/nda/exemptions/:userId/document", h.DownloadExemptionDocument, adminOnly)
 }
 
 // ActiveTemplate handles GET /nda/active, returning the current active NDA template
@@ -154,6 +168,19 @@ func (h *NDAHandler) UpdateTemplate(c echo.Context) error {
 func (h *NDAHandler) CheckStatus(c echo.Context) error {
 	userID := middleware.GetUserID(c)
 
+	// An admin-granted exemption (e.g. an NDA executed outside the portal)
+	// satisfies the requirement without a click-through signature.
+	exempt, err := h.ndaRepo.IsExempt(c.Request().Context(), userID)
+	if err != nil {
+		return response.InternalError(c)
+	}
+	if exempt {
+		return response.OK(c, "NDA status", map[string]any{
+			"signed": true,
+			"exempt": true,
+		})
+	}
+
 	// Find active templates.
 	templates, err := h.ndaRepo.ListTemplates(c.Request().Context())
 	if err != nil {
@@ -255,6 +282,116 @@ func (h *NDAHandler) Sign(c echo.Context) error {
 	}
 
 	return response.Created(c, "NDA signed", sig)
+}
+
+// ListExemptions handles GET /nda/exemptions.
+func (h *NDAHandler) ListExemptions(c echo.Context) error {
+	exemptions, err := h.ndaRepo.ListExemptions(c.Request().Context())
+	if err != nil {
+		return response.InternalError(c)
+	}
+	return response.OK(c, "Exemptions retrieved", exemptions)
+}
+
+// GrantExemption handles POST /nda/exemptions (multipart/form-data).
+// Form fields: user_id (required), reason (optional), file (optional — an
+// externally executed NDA document kept as evidence for the waiver).
+// Granting again for the same user replaces the existing exemption.
+func (h *NDAHandler) GrantExemption(c echo.Context) error {
+	targetUserID := c.FormValue("user_id")
+	if targetUserID == "" {
+		return response.BadRequest(c, "user_id is required")
+	}
+
+	// Validate the target user exists so an exemption cannot dangle.
+	user, err := h.userRepo.GetByID(c.Request().Context(), targetUserID)
+	if err != nil {
+		if err == domain.ErrUserNotFound {
+			return response.NotFound(c, "user not found")
+		}
+		return response.InternalError(c)
+	}
+
+	ex := &domain.NDAExemption{
+		UserID:    user.ID,
+		Reason:    c.FormValue("reason"),
+		GrantedBy: middleware.GetUserID(c),
+	}
+
+	// The executed NDA document is optional; an exemption may stand on its own.
+	file, err := c.FormFile("file")
+	if err == nil && file != nil {
+		if file.Size > maxExemptionUploadSize {
+			return response.TooLarge(c, fmt.Sprintf("file exceeds maximum size of %d bytes", maxExemptionUploadSize))
+		}
+		src, err := file.Open()
+		if err != nil {
+			return response.InternalError(c)
+		}
+		defer src.Close()
+
+		fileData, err := io.ReadAll(src)
+		if err != nil {
+			return response.InternalError(c)
+		}
+
+		ex.FileData = fileData
+		ex.FileSize = int64(len(fileData))
+		ex.FileName = sanitize.FileName(file.Filename)
+		// Derive the MIME type from the actual bytes rather than trusting the
+		// client-supplied Content-Type, which is later echoed back on download.
+		ex.MimeType = http.DetectContentType(fileData)
+	}
+
+	if err := h.ndaRepo.UpsertExemption(c.Request().Context(), ex); err != nil {
+		return response.InternalError(c)
+	}
+
+	details := "reason=" + ex.Reason
+	if ex.FileName != "" {
+		details += " document=" + ex.FileName
+	}
+	h.audit.LogFromContext(c, domain.AuditNDAExemptionGranted, "user", user.ID, user.Email, details)
+
+	return response.Created(c, "Exemption granted", ex)
+}
+
+// RevokeExemption handles DELETE /nda/exemptions/:userId.
+func (h *NDAHandler) RevokeExemption(c echo.Context) error {
+	userID := c.Param("userId")
+
+	if err := h.ndaRepo.DeleteExemption(c.Request().Context(), userID); err != nil {
+		if err == domain.ErrExemptionNotFound {
+			return response.NotFound(c, "exemption not found")
+		}
+		return response.InternalError(c)
+	}
+
+	h.audit.LogFromContext(c, domain.AuditNDAExemptionRevoked, "user", userID, "", "")
+
+	return response.OK(c, "Exemption revoked", nil)
+}
+
+// DownloadExemptionDocument handles GET /nda/exemptions/:userId/document,
+// returning the externally executed NDA uploaded with the exemption.
+func (h *NDAHandler) DownloadExemptionDocument(c echo.Context) error {
+	userID := c.Param("userId")
+
+	ex, err := h.ndaRepo.GetExemptionDocument(c.Request().Context(), userID)
+	if err != nil {
+		if err == domain.ErrExemptionNotFound {
+			return response.NotFound(c, "exemption not found")
+		}
+		return response.InternalError(c)
+	}
+	if !ex.HasDocument {
+		return response.NotFound(c, "no document attached to this exemption")
+	}
+
+	c.Response().Header().Set("Content-Type", ex.MimeType)
+	c.Response().Header().Set("Content-Disposition",
+		fmt.Sprintf("attachment; filename=%q", sanitize.FileName(ex.FileName)))
+	return c.Blob(http.StatusOK, ex.MimeType, ex.FileData)
 }
 
 // ListSignatures handles GET /nda/signatures.

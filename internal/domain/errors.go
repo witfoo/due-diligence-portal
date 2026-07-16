@@ -21,14 +21,15 @@ var (
 
 // Not found errors.
 var (
-	ErrUserNotFound     = errors.New("user not found")
-	ErrDocumentNotFound = errors.New("document not found")
-	ErrCategoryNotFound = errors.New("category not found")
-	ErrThreadNotFound   = errors.New("thread not found")
-	ErrTemplateNotFound = errors.New("template not found")
-	ErrGrantNotFound    = errors.New("access grant not found")
-	ErrTokenNotFound    = errors.New("invite token not found")
-	ErrVersionNotFound  = errors.New("document version not found")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrDocumentNotFound  = errors.New("document not found")
+	ErrCategoryNotFound  = errors.New("category not found")
+	ErrThreadNotFound    = errors.New("thread not found")
+	ErrTemplateNotFound  = errors.New("template not found")
+	ErrGrantNotFound     = errors.New("access grant not found")
+	ErrTokenNotFound     = errors.New("invite token not found")
+	ErrVersionNotFound   = errors.New("document version not found")
+	ErrExemptionNotFound = errors.New("nda exemption not found")
 )
 
 // Auth errors.
