@@ -239,3 +239,42 @@ func TestPermissionHandler_Unauthenticated(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
+
+func TestPermissionHandler_ListByUser(t *testing.T) {
+	e, token, investorID := setupPermissionTest(t)
+
+	// Grant category-level access to a seeded category.
+	grantPermission(t, e, token, investorID, "category", "cat-financials", "download")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/permissions/user/"+investorID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	list, ok := resp.Data.([]any)
+	require.True(t, ok)
+	require.Len(t, list, 1)
+
+	grant := list[0].(map[string]any)
+	assert.Equal(t, "category", grant["resource_type"])
+	assert.Equal(t, "cat-financials", grant["resource_id"])
+	assert.Equal(t, "download", grant["access_level"])
+	// The resource name is resolved so the admin UI can show what the grant covers.
+	assert.Equal(t, "Financials", grant["resource_name"])
+	assert.Equal(t, "investor@test.com", grant["user_email"])
+}
+
+func TestPermissionHandler_ListByUser_Empty(t *testing.T) {
+	e, token, investorID := setupPermissionTest(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/permissions/user/"+investorID, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}

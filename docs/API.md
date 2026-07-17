@@ -52,6 +52,7 @@ All responses use the standard envelope:
 | --- | --- | --- | --- | --- |
 | GET | `/permissions/document/:id` | Yes | Admin | List grants for document |
 | GET | `/permissions/category/:id` | Yes | Admin | List grants for category |
+| GET | `/permissions/user/:id` | Yes | Admin | List all grants held by a user |
 | POST | `/permissions` | Yes | Admin | Grant access |
 | PUT | `/permissions/:id` | Yes | Admin | Update access level |
 | DELETE | `/permissions/:id` | Yes | Admin | Revoke access |

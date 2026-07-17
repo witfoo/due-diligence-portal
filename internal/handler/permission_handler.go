@@ -26,6 +26,7 @@ func NewPermissionHandler(permRepo repository.PermissionRepository, audit *middl
 func (h *PermissionHandler) RegisterRoutes(g *echo.Group) {
 	g.GET("/permissions/document/:id", h.ListByDocument)
 	g.GET("/permissions/category/:id", h.ListByCategory)
+	g.GET("/permissions/user/:id", h.ListByUser)
 	g.POST("/permissions", h.Grant)
 	g.PUT("/permissions/:id", h.Update)
 	g.DELETE("/permissions/:id", h.Revoke)
@@ -46,6 +47,18 @@ func (h *PermissionHandler) ListByDocument(c echo.Context) error {
 func (h *PermissionHandler) ListByCategory(c echo.Context) error {
 	id := c.Param("id")
 	grants, err := h.permRepo.ListByResource(c.Request().Context(), domain.ResourceCategory, id)
+	if err != nil {
+		return response.InternalError(c)
+	}
+
+	return response.OK(c, "Grants retrieved", grants)
+}
+
+// ListByUser handles GET /permissions/user/:id, returning every grant held by
+// one user — the admin view for "what can this investor see".
+func (h *PermissionHandler) ListByUser(c echo.Context) error {
+	id := c.Param("id")
+	grants, err := h.permRepo.ListByUser(c.Request().Context(), id)
 	if err != nil {
 		return response.InternalError(c)
 	}

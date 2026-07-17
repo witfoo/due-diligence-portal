@@ -11,6 +11,7 @@
 		<h2>Admin</h2>
 		<ul>
 			<li><a href="/admin/users" class:active={currentPath.startsWith('/admin/users')}>Users</a></li>
+			<li><a href="/admin/permissions" class:active={currentPath.startsWith('/admin/permissions')}>Access Grants</a></li>
 			<li><a href="/admin/categories" class:active={currentPath.startsWith('/admin/categories')}>Categories</a></li>
 			<li><a href="/admin/branding" class:active={currentPath.startsWith('/admin/branding')}>Branding</a></li>
 			<li><a href="/admin/watermark" class:active={currentPath.startsWith('/admin/watermark')}>Watermark</a></li>

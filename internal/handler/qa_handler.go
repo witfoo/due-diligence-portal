@@ -86,9 +86,10 @@ func (h *QAHandler) CreateThread(c echo.Context) error {
 		return response.BadRequest(c, "subject is required")
 	}
 
-	// Investors may only attach a question to a document/category they can access,
-	// preventing them from referencing (and revealing) resources they lack a grant for.
-	if !isPrivileged(middleware.GetUserRole(c)) {
+	// In granted mode, investors may only attach a question to a document/category
+	// they can access, preventing them from referencing (and revealing) resources
+	// they lack a grant for. In open mode every investor can reference anything.
+	if !isPrivileged(middleware.GetUserRole(c)) && !investorAccessOpen() {
 		userID := middleware.GetUserID(c)
 		ctx := c.Request().Context()
 		if req.DocumentID != nil && *req.DocumentID != "" {

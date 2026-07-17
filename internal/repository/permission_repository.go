@@ -61,7 +61,11 @@ func (r *permissionRepository) GetByID(ctx context.Context, id string) (*domain.
 	row := r.db.QueryRowContext(ctx,
 		`SELECT ag.id, ag.user_id, ag.resource_type, ag.resource_id, ag.access_level,
 		        ag.granted_by, ag.expires_at, ag.created_at,
-		        COALESCE(u.email, '') AS user_email, COALESCE(u.name, '') AS user_name
+		        COALESCE(u.email, '') AS user_email, COALESCE(u.name, '') AS user_name,
+		        COALESCE(CASE ag.resource_type
+		          WHEN 'document' THEN (SELECT d.name FROM documents d WHERE d.id = ag.resource_id)
+		          WHEN 'category' THEN (SELECT c.name FROM categories c WHERE c.id = ag.resource_id)
+		        END, '') AS resource_name
 		 FROM access_grants ag
 		 LEFT JOIN users u ON u.id = ag.user_id
 		 WHERE ag.id = ?`, id)
@@ -72,7 +76,11 @@ func (r *permissionRepository) ListByUser(ctx context.Context, userID string) ([
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT ag.id, ag.user_id, ag.resource_type, ag.resource_id, ag.access_level,
 		        ag.granted_by, ag.expires_at, ag.created_at,
-		        COALESCE(u.email, '') AS user_email, COALESCE(u.name, '') AS user_name
+		        COALESCE(u.email, '') AS user_email, COALESCE(u.name, '') AS user_name,
+		        COALESCE(CASE ag.resource_type
+		          WHEN 'document' THEN (SELECT d.name FROM documents d WHERE d.id = ag.resource_id)
+		          WHEN 'category' THEN (SELECT c.name FROM categories c WHERE c.id = ag.resource_id)
+		        END, '') AS resource_name
 		 FROM access_grants ag
 		 LEFT JOIN users u ON u.id = ag.user_id
 		 WHERE ag.user_id = ?
@@ -88,7 +96,11 @@ func (r *permissionRepository) ListByResource(ctx context.Context, resourceType,
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT ag.id, ag.user_id, ag.resource_type, ag.resource_id, ag.access_level,
 		        ag.granted_by, ag.expires_at, ag.created_at,
-		        COALESCE(u.email, '') AS user_email, COALESCE(u.name, '') AS user_name
+		        COALESCE(u.email, '') AS user_email, COALESCE(u.name, '') AS user_name,
+		        COALESCE(CASE ag.resource_type
+		          WHEN 'document' THEN (SELECT d.name FROM documents d WHERE d.id = ag.resource_id)
+		          WHEN 'category' THEN (SELECT c.name FROM categories c WHERE c.id = ag.resource_id)
+		        END, '') AS resource_name
 		 FROM access_grants ag
 		 LEFT JOIN users u ON u.id = ag.user_id
 		 WHERE ag.resource_type = ? AND ag.resource_id = ?
@@ -153,7 +165,7 @@ func (r *permissionRepository) scanGrant(row *sql.Row) (*domain.AccessGrant, err
 	var createdAt string
 
 	err := row.Scan(&g.ID, &g.UserID, &g.ResourceType, &g.ResourceID, &g.AccessLevel,
-		&g.GrantedBy, &expiresAt, &createdAt, &g.UserEmail, &g.UserName)
+		&g.GrantedBy, &expiresAt, &createdAt, &g.UserEmail, &g.UserName, &g.ResourceName)
 	if err == sql.ErrNoRows {
 		return nil, domain.ErrGrantNotFound
 	}
@@ -176,7 +188,7 @@ func (r *permissionRepository) scanGrantRows(rows *sql.Rows) ([]*domain.AccessGr
 		var createdAt string
 
 		err := rows.Scan(&g.ID, &g.UserID, &g.ResourceType, &g.ResourceID, &g.AccessLevel,
-			&g.GrantedBy, &expiresAt, &createdAt, &g.UserEmail, &g.UserName)
+			&g.GrantedBy, &expiresAt, &createdAt, &g.UserEmail, &g.UserName, &g.ResourceName)
 		if err != nil {
 			return nil, fmt.Errorf("scan access grant row: %w", err)
 		}

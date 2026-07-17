@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/middleware"
 	"github.com/witfoo/due-diligence-portal/internal/repository"
 	"github.com/witfoo/due-diligence-portal/internal/service"
@@ -327,4 +328,79 @@ func TestDocumentHandler_Unauthenticated(t *testing.T) {
 
 	e.ServeHTTP(rec, req)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+// setInvestorAccessMode overrides DD_INVESTOR_ACCESS for one test.
+func setInvestorAccessMode(t *testing.T, mode string) {
+	t.Helper()
+	prev := investorAccessMode
+	investorAccessMode = mode
+	t.Cleanup(func() { investorAccessMode = prev })
+}
+
+// loginInvestor invites and registers an investor, returning their token.
+func loginInvestor(t *testing.T, authSvc *service.AuthService, adminToken string) string {
+	t.Helper()
+	claims, err := authSvc.ValidateToken(adminToken)
+	require.NoError(t, err)
+	invite, err := authSvc.CreateInvite(context.Background(), "investor@doc.test", domain.RoleInvestor, claims.UserID)
+	require.NoError(t, err)
+	result, err := authSvc.Register(context.Background(), invite.Token, "Doc Investor", "password123")
+	require.NoError(t, err)
+	return result.AccessToken
+}
+
+func TestDocumentHandler_InvestorOpenAccess(t *testing.T) {
+	e, authSvc, adminToken := setupDocumentTest(t)
+	setInvestorAccessMode(t, "all")
+
+	docID := uploadDocument(t, e, adminToken, "cat-financials")
+	invToken := loginInvestor(t, authSvc, adminToken)
+
+	// With open access (the default), an ungranted investor sees every document.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/documents", nil)
+	req.Header.Set("Authorization", "Bearer "+invToken)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	docs, ok := resp.Data.([]any)
+	require.True(t, ok)
+	require.Len(t, docs, 1)
+
+	// Detail and download are open too.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/documents/"+docID+"/download", nil)
+	req.Header.Set("Authorization", "Bearer "+invToken)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "fake pdf content", rec.Body.String())
+}
+
+func TestDocumentHandler_InvestorGrantedMode(t *testing.T) {
+	e, authSvc, adminToken := setupDocumentTest(t)
+	setInvestorAccessMode(t, "granted")
+
+	docID := uploadDocument(t, e, adminToken, "cat-financials")
+	invToken := loginInvestor(t, authSvc, adminToken)
+
+	// In granted mode an ungranted investor sees nothing.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/documents", nil)
+	req.Header.Set("Authorization", "Bearer "+invToken)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Nil(t, resp.Data)
+
+	// The document detail is a 404, not a 403, to avoid confirming it exists.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/documents/"+docID, nil)
+	req.Header.Set("Authorization", "Bearer "+invToken)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
