@@ -80,6 +80,8 @@ jobs:
       - run: cd ui && npm ci
       - name: Go Unit Tests
         run: go test -short -count=1 -coverprofile=coverage.out ./...
+        env:
+          DD_BCRYPT_COST: '4'
       - name: UI Unit Tests
         run: cd ui && npm test
       - name: Coverage Summary
@@ -95,7 +97,11 @@ jobs:
         with:
           go-version: '1.26.5'
           cache: true
-      - run: go test -race -short -count=1 ./...
+      # Minimum bcrypt cost: password hashing dominates test runtime under -race
+      # (the suite outgrew go test's default 10m timeout at production cost 12).
+      - run: go test -race -short -count=1 -timeout 20m ./...
+        env:
+          DD_BCRYPT_COST: '4'
 
   security-scan:
     name: Security Scan

@@ -60,7 +60,7 @@ ui/src/                        Svelte 5 + SvelteKit (adapter-static)
 | Doc | Contents |
 | --- | --- |
 | [docs/API.md](docs/API.md) | All REST endpoints by resource |
-| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | All 21 environment variables |
+| [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) | All 22 environment variables |
 | [docs/TESTING.md](docs/TESTING.md) | Test pyramid, scripts, patterns |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, TLS modes, backup |
 

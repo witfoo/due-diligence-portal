@@ -14,10 +14,11 @@ import (
 
 	"github.com/witfoo/due-diligence-portal/internal/domain"
 	"github.com/witfoo/due-diligence-portal/internal/repository"
+	"github.com/witfoo/due-diligence-portal/pkg/envconfig"
 )
 
 const (
-	bcryptCost         = 12
+	defaultBcryptCost  = 12
 	accessTokenExpiry  = 15 * time.Minute
 	refreshTokenExpiry = 7 * 24 * time.Hour
 	tokenIssuer        = "dd-portal"
@@ -31,6 +32,17 @@ const (
 	// it outside dev mode (see cmd/main.go) because it is public in source control.
 	DefaultJWTSecret = "dev-secret-change-in-production-32chars"
 )
+
+// bcryptCost is the work factor for password hashes. DD_BCRYPT_COST exists so CI
+// can lower it (bcrypt dominates test runtime under -race); values outside
+// bcrypt's valid range fall back to the default. Do not lower it in production.
+var bcryptCost = func() int {
+	c := int(envconfig.GetEnvInt64("DD_BCRYPT_COST", defaultBcryptCost))
+	if c < bcrypt.MinCost || c > bcrypt.MaxCost {
+		return defaultBcryptCost
+	}
+	return c
+}()
 
 // dummyHash is a precomputed bcrypt hash used to equalize Login timing when the
 // account is unknown or disabled, preventing user-enumeration via response time.
