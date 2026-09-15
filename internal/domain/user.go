@@ -3,6 +3,7 @@ package domain
 import (
 	"regexp"
 	"time"
+	"unicode/utf8"
 )
 
 // Role constants.
@@ -10,6 +11,15 @@ const (
 	RoleAdmin         = "admin"
 	RoleCompanyMember = "company_member"
 	RoleInvestor      = "investor"
+)
+
+// Password policy limits. The maximum is measured in bytes because bcrypt only
+// accepts the first 72 bytes of its input (golang.org/x/crypto/bcrypt rejects
+// anything longer), so a longer password would either fail to hash or silently
+// lose entropy.
+const (
+	PasswordMinLength = 8
+	PasswordMaxBytes  = 72
 )
 
 // ValidRoles contains all valid user roles.
@@ -62,6 +72,23 @@ func ValidateEmail(email string) error {
 func ValidateRole(role string) error {
 	if !ValidRoles[role] {
 		return ErrInvalidRole
+	}
+	return nil
+}
+
+// ValidatePassword returns an error if password violates the password policy:
+// it is required, must be at least PasswordMinLength characters (Unicode code
+// points), and must be at most PasswordMaxBytes bytes when UTF-8 encoded. The
+// returned errors are sentinels and never contain the password.
+func ValidatePassword(password string) error {
+	if password == "" {
+		return ErrPasswordRequired
+	}
+	if utf8.RuneCountInString(password) < PasswordMinLength {
+		return ErrPasswordTooShort
+	}
+	if len(password) > PasswordMaxBytes {
+		return ErrPasswordTooLong
 	}
 	return nil
 }

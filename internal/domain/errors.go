@@ -9,6 +9,7 @@ var (
 	ErrNameRequired     = errors.New("name is required")
 	ErrPasswordRequired = errors.New("password is required")
 	ErrPasswordTooShort = errors.New("password must be at least 8 characters")
+	ErrPasswordTooLong  = errors.New("password must be at most 72 bytes")
 	ErrInvalidRole      = errors.New("invalid role")
 	ErrInvalidEmail     = errors.New("invalid email format")
 	ErrSubjectRequired  = errors.New("subject is required")
@@ -41,6 +42,13 @@ var (
 	ErrEmailTaken         = errors.New("email already registered")
 	ErrUnauthorized       = errors.New("unauthorized")
 	ErrForbidden          = errors.New("insufficient permissions")
+)
+
+// Password change errors. These are reported as 400 (never 401: the UI treats
+// any 401 as an expired session and logs the user out).
+var (
+	ErrCurrentPasswordRequired  = errors.New("current password is required")
+	ErrCurrentPasswordIncorrect = errors.New("current password is incorrect")
 )
 
 // NDA errors.

@@ -43,6 +43,18 @@ export interface ApiErrorResponse {
 	timestamp: string;
 }
 
+/**
+ * Extract the server's user-facing error message from a thrown error.
+ * Returns the envelope's `error` string when present and non-empty, else `fallback`.
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+	if (err instanceof ApiError && err.body !== null && typeof err.body === 'object') {
+		const message = (err.body as { error?: unknown }).error;
+		if (typeof message === 'string' && message.trim() !== '') return message;
+	}
+	return fallback;
+}
+
 function getAuthToken(): string | null {
 	if (typeof window === 'undefined') return null;
 	return localStorage.getItem(ACCESS_KEY);

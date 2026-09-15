@@ -73,6 +73,7 @@
 			<option value="">All Actions</option>
 			<option value="user.login">User Login</option>
 			<option value="user.created">User Created</option>
+			<option value="user.password_set">Password Set</option>
 			<option value="document.uploaded">Document Upload</option>
 			<option value="document.downloaded">Document Download</option>
 			<option value="document.viewed">Document View</option>

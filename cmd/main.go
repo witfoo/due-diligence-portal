@@ -108,6 +108,10 @@ func main() {
 	loginLimit := envconfig.GetEnvInt("DD_LOGIN_RATE_LIMIT", 10)
 	loginLimiter := middleware.NewRateLimiter(loginLimit, time.Minute)
 	loginThrottle := loginLimiter.Middleware()
+	// Set-password gets the same budget, because its self-service current_password
+	// check can be used to guess passwords. It has its own counter so an admin
+	// setting several passwords does not use up the login and token-refresh budget.
+	passwordLimiter := middleware.NewRateLimiter(loginLimit, time.Minute)
 
 	// CORS is disabled by default (the UI is served same-origin). Set
 	// DD_CORS_ORIGINS to a comma-separated allowlist to enable cross-origin access;
@@ -189,7 +193,7 @@ func main() {
 
 	// User management (admin only).
 	userHandler := handler.NewUserHandler(userRepo, authSvc, emailSvc, auditLogger)
-	userHandler.RegisterRoutes(adminGroup)
+	userHandler.RegisterRoutes(adminGroup, passwordLimiter.Middleware())
 
 	// Documents (all handlers register on authGroup; internal role checks as needed).
 	docHandler := handler.NewDocumentHandler(docRepo, permRepo, auditLogger)

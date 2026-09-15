@@ -14,6 +14,16 @@ export interface User {
 	updated_at: string;
 }
 
+/**
+ * Response data for PUT /users/:id/password. Tokens are only returned when an
+ * admin changes their own password (their previous refresh token is revoked).
+ */
+export interface SetPasswordResponse {
+	user: User;
+	access_token?: string;
+	refresh_token?: string;
+}
+
 export interface InviteToken {
 	id: string;
 	token: string;
