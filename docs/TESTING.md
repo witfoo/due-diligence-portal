@@ -5,8 +5,8 @@
 | Level | Count | Tools | What It Tests |
 | --- | --- | --- | --- |
 | Unit | 205 | testify (Go), Vitest (UI) | Functions with mocked deps |
-| System | 60 | curl + Docker | Full API validation against running container |
-| E2E | 20 | Playwright | Browser UI rendering and navigation |
+| System | 64 | curl + Docker | Full API validation against running container |
+| E2E | 21 | Playwright | Browser UI rendering and navigation |
 
 ## Running Tests
 
@@ -40,7 +40,7 @@ go test -race -short ./...
 | --- | --- |
 | `scripts/testing/linter.sh` | gofmt, goimports, go vet, golangci-lint, svelte-check, eslint |
 | `scripts/testing/unit-tests.sh` | Go unit tests + Vitest |
-| `scripts/testing/system-tests.sh` | Docker-based API validation (15 steps, 60 checks) |
+| `scripts/testing/system-tests.sh` | Docker-based API validation (15 steps, 64 checks) |
 | `scripts/testing/e2e-tests.sh` | Playwright against Docker container |
 | `scripts/testing/security.sh` | govulncheck, npm audit, race detection |
 | `scripts/testing/full-testing.sh` | Orchestrates all above, supports `--from-step` |
@@ -61,7 +61,7 @@ It validates every API endpoint through 15 steps:
 9. Branding (get, update, reset)
 10. Watermark (get, update, reset)
 11. Audit log (verify entries logged)
-12. User management (list, invite, register)
+12. User management (list, invite, register, admin sets a user's password)
 13. RBAC enforcement (investor blocked from admin endpoints)
 14. UI pages (all 10 routes return 200)
 15. Security headers (CSP, X-Frame-Options, etc.)

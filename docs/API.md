@@ -127,8 +127,31 @@ Valid asset keys: `logo`, `logo_dark`, `favicon`, `login_background`, `email_hea
 | GET | `/users` | Yes | Admin | List users |
 | GET | `/users/:id` | Yes | Admin | Get user |
 | PUT | `/users/:id` | Yes | Admin | Update user |
+| PUT | `/users/:id/password` | Yes | Admin | Set a user's password |
 | DELETE | `/users/:id` | Yes | Admin | Deactivate user |
 | POST | `/users/invite` | Yes | Admin | Create invite |
+
+**Set password** (`PUT /users/:id/password`): body `{"password": "...", "current_password": "..."}`.
+`password` is required, must be at least 8 characters, and at most 72 bytes (bcrypt's limit).
+
+- **Another user**: `current_password` is ignored. Returns `{"user": {...}}`. Role and active
+  state are unchanged, so a disabled account can be given a password before it is re-enabled.
+- **Your own account**: `current_password` is required and re-verified. Returns
+  `{"user": {...}, "access_token": "...", "refresh_token": "..."}`; store the new tokens.
+
+Errors: `400` for an invalid body, a password that breaks the length rules,
+`current password is required`, or `current password is incorrect` (never `401`, which the UI
+treats as an expired session); `404` for an unknown user; `403` for non-admins; `429` when the
+per-IP limit is exceeded (`DD_LOGIN_RATE_LIMIT`, default 10 per minute, the login budget with its
+own counter, because the `current_password` check could otherwise be used to guess passwords).
+Wrong `current_password` attempts are logged as warnings. The change is audited as
+`user.password_set`; passwords never appear in responses, logs, or audit entries.
+
+Changing a password revokes every refresh token issued to that user before the change: refreshing
+returns `401` and they must sign in again (the self-change response carries a fresh pair for the
+caller). Access tokens already issued are not revoked and remain valid until they expire (up to
+15 minutes). Refresh tokens issued by versions before this feature carry no password version and
+are rejected, so users sign in once more after upgrading.
 
 ## Health (no auth, no `/api/v1` prefix)
 

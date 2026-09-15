@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log"
 
 	"github.com/labstack/echo/v4"
@@ -26,13 +27,18 @@ func NewUserHandler(userRepo repository.UserRepository, authSvc *service.AuthSer
 	return &UserHandler{userRepo: userRepo, authSvc: authSvc, emailSvc: emailSvc, audit: audit}
 }
 
-// RegisterRoutes registers user management routes.
-func (h *UserHandler) RegisterRoutes(g *echo.Group) {
+// RegisterRoutes registers user management routes. passwordThrottle is a strict
+// per-IP rate limiter for the set-password route: when the caller changes their
+// own password, the current_password check can be used to guess passwords, so
+// it gets the same budget as login instead of the permissive global limit. It
+// runs after the group's auth middleware, so rejected callers do not use it up.
+func (h *UserHandler) RegisterRoutes(g *echo.Group, passwordThrottle echo.MiddlewareFunc) {
 	g.GET("/users", h.List)
 	g.GET("/users/invites", h.ListInvites)
 	g.DELETE("/users/invites/:id", h.RevokeInvite)
 	g.GET("/users/:id", h.Get)
 	g.PUT("/users/:id", h.Update)
+	g.PUT("/users/:id/password", h.SetPassword, passwordThrottle)
 	g.DELETE("/users/:id", h.Deactivate)
 	g.POST("/users/invite", h.Invite)
 }
@@ -152,6 +158,93 @@ func (h *UserHandler) Update(c echo.Context) error {
 	h.audit.LogFromContext(c, domain.AuditUserUpdated, "user", user.ID, user.Email, "")
 
 	return response.OK(c, "User updated", user)
+}
+
+type setPasswordRequest struct {
+	Password        string `json:"password"`
+	CurrentPassword string `json:"current_password"`
+}
+
+// SetPassword handles PUT /api/v1/users/:id/password.
+//
+// For another user, the administrator sets the password directly and
+// current_password is ignored. For the caller's own account, current_password is
+// re-verified and a fresh token pair is returned, because the change revokes the
+// caller's existing refresh tokens. Re-authentication failures are 400, never
+// 401: the UI treats any 401 as an expired session. Passwords are never logged,
+// audited, or echoed back.
+func (h *UserHandler) SetPassword(c echo.Context) error {
+	id := c.Param("id")
+	var req setPasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return response.BadRequest(c, "invalid request body")
+	}
+
+	if err := domain.ValidatePassword(req.Password); err != nil {
+		return response.BadRequest(c, err.Error())
+	}
+
+	if middleware.GetUserID(c) == id {
+		return h.changeOwnPassword(c, id, req.CurrentPassword, req.Password)
+	}
+
+	user, err := h.authSvc.SetPassword(c.Request().Context(), id, req.Password)
+	if err != nil {
+		return setPasswordError(c, id, err)
+	}
+
+	h.audit.LogFromContext(c, domain.AuditUserPasswordSet, "user", user.ID, user.Email, "set by administrator")
+
+	return response.OK(c, "Password updated", map[string]any{"user": user})
+}
+
+// changeOwnPassword handles the self-service branch of SetPassword.
+func (h *UserHandler) changeOwnPassword(c echo.Context, id, currentPassword, newPassword string) error {
+	result, err := h.authSvc.ChangeOwnPassword(c.Request().Context(), id, currentPassword, newPassword)
+	if err != nil {
+		if errors.Is(err, domain.ErrCurrentPasswordIncorrect) {
+			// Record failed re-authentication so repeated guessing is visible. The
+			// submitted password is never logged.
+			log.Printf("[WARN] Password change rejected for user %s from %s: current password incorrect",
+				sanitize.LogValue(id), sanitize.LogValue(c.RealIP()))
+		}
+		return setPasswordError(c, id, err)
+	}
+
+	h.audit.LogFromContext(c, domain.AuditUserPasswordSet, "user", result.User.ID, result.User.Email, "changed own password")
+
+	return response.OK(c, "Password updated", map[string]any{
+		"user":          result.User,
+		"access_token":  result.AccessToken,
+		"refresh_token": result.RefreshToken,
+	})
+}
+
+// passwordBadRequestErrors are the password failures reported to the client as
+// 400 with the sentinel's own message.
+var passwordBadRequestErrors = []error{
+	domain.ErrPasswordRequired,
+	domain.ErrPasswordTooShort,
+	domain.ErrPasswordTooLong,
+	domain.ErrCurrentPasswordRequired,
+	domain.ErrCurrentPasswordIncorrect,
+}
+
+// setPasswordError maps a password-set failure to a response. Only sentinel
+// messages reach the client; anything else is logged (service errors never
+// contain the password) and reported as a generic 500.
+func setPasswordError(c echo.Context, id string, err error) error {
+	for _, sentinel := range passwordBadRequestErrors {
+		if errors.Is(err, sentinel) {
+			return response.BadRequest(c, sentinel.Error())
+		}
+	}
+	if errors.Is(err, domain.ErrUserNotFound) {
+		return response.NotFound(c, "user not found")
+	}
+	log.Printf("[ERROR] Failed to set password for user %s: %s",
+		sanitize.LogValue(id), sanitize.LogValue(err.Error()))
+	return response.InternalError(c)
 }
 
 // Deactivate handles DELETE /api/v1/users/:id.

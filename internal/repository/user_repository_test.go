@@ -175,6 +175,43 @@ func TestUserRepository_UpdateLastLogin(t *testing.T) {
 	assert.NotNil(t, found.LastLoginAt)
 }
 
+func TestUserRepository_UpdatePassword(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	user := &domain.User{ID: "u1", Email: "pw@test.com", Name: "PW User", PasswordHash: "old-hash", Role: domain.RoleInvestor, IsActive: false}
+	require.NoError(t, repo.Create(ctx, user))
+
+	// Backdate updated_at so the bump is observable at RFC3339 (second) precision.
+	backdated := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := db.ExecContext(ctx, `UPDATE users SET updated_at = ? WHERE id = ?`, backdated.Format(time.RFC3339), "u1")
+	require.NoError(t, err)
+
+	require.NoError(t, repo.UpdatePassword(ctx, "u1", "new-hash"))
+
+	found, err := repo.GetByID(ctx, "u1")
+	require.NoError(t, err)
+	assert.Equal(t, "new-hash", found.PasswordHash)
+	assert.True(t, found.UpdatedAt.After(backdated), "updated_at should be bumped, got %v", found.UpdatedAt)
+
+	// Nothing but the password (and updated_at) changes.
+	assert.Equal(t, "pw@test.com", found.Email)
+	assert.Equal(t, "PW User", found.Name)
+	assert.Equal(t, domain.RoleInvestor, found.Role)
+	assert.False(t, found.IsActive)
+}
+
+func TestUserRepository_UpdatePassword_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewUserRepository(db)
+	ctx := context.Background()
+
+	err := repo.UpdatePassword(ctx, "nonexistent", "secret-hash-value")
+	require.ErrorIs(t, err, domain.ErrUserNotFound)
+	assert.NotContains(t, err.Error(), "secret-hash-value")
+}
+
 func TestUserRepository_InviteToken(t *testing.T) {
 	db := setupTestDB(t)
 	repo := NewUserRepository(db)

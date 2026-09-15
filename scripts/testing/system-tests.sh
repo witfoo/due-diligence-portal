@@ -553,6 +553,7 @@ if [ -n "$INVITE_TOKEN" ] && [ "$INVITE_TOKEN" != "None" ]; then
         -d "{\"token\":\"$INVITE_TOKEN\",\"name\":\"Test Investor\",\"password\":\"InvestorPass123\"}" \
         "${BASE_URL}/api/v1/auth/register")
     REG_SUCCESS=$(echo "$REG_RESP" | json_field "['success']")
+    INVESTOR_ID=$(echo "$REG_RESP" | json_field "['data']['user']['id']" || true)
     if [ "$REG_SUCCESS" = "True" ]; then
         log_success "POST /auth/register creates account via invite"
     else
@@ -568,6 +569,38 @@ if [ -n "$INVITE_TOKEN" ] && [ "$INVITE_TOKEN" != "None" ]; then
         log_success "New investor can login with correct role"
     else
         log_fail "Investor login returned unexpected role: $INV_ROLE"
+    fi
+
+    # Admin sets the investor's password.
+    INVESTOR_NEW_PASSWORD="InvestorReset456"
+    SETPW_SUCCESS=$(api_put "/users/${INVESTOR_ID}/password" "{\"password\":\"$INVESTOR_NEW_PASSWORD\"}" \
+        | json_field "['success']" || true)
+    if [ "$SETPW_SUCCESS" = "True" ]; then
+        log_success "PUT /users/:id/password sets the investor's password"
+    else
+        log_fail "PUT /users/:id/password failed"
+    fi
+
+    # The new password works. Step 13 uses this session from here on.
+    INV_LOGIN_NEW=$(curl -sf -X POST -H "Content-Type: application/json" \
+        -d "{\"email\":\"investor@test.com\",\"password\":\"$INVESTOR_NEW_PASSWORD\"}" \
+        "${BASE_URL}/api/v1/auth/login" || true)
+    INV_NEW_ROLE=$(echo "$INV_LOGIN_NEW" | json_field "['data']['user']['role']" || true)
+    if [ "$INV_NEW_ROLE" = "investor" ]; then
+        log_success "Investor can login with the password set by the admin"
+        INV_LOGIN="$INV_LOGIN_NEW"
+    else
+        log_fail "Investor login with the new password failed"
+    fi
+
+    # The old password no longer works.
+    OLD_PW_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" \
+        -d '{"email":"investor@test.com","password":"InvestorPass123"}' \
+        "${BASE_URL}/api/v1/auth/login")
+    if [ "$OLD_PW_STATUS" = "401" ]; then
+        log_success "Investor's old password is rejected after the change (401)"
+    else
+        log_fail "Old investor password should return 401 after the change, got $OLD_PW_STATUS"
     fi
 fi
 
@@ -609,6 +642,18 @@ if [ -n "$INVITE_TOKEN" ] && [ "$INVITE_TOKEN" != "None" ]; then
         log_success "Investor cannot access audit log (403)"
     else
         log_fail "RBAC: investor should get 403 on GET /audit, got $RBAC_AUDIT"
+    fi
+
+    # Investor should NOT be able to set passwords (admin only), including the admin's.
+    ADMIN_ID=$(echo "$LOGIN_RESP" | json_field "['data']['user']['id']" || true)
+    RBAC_SETPW=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        -H "Authorization: Bearer $INV_TOKEN" -H "Content-Type: application/json" \
+        -d '{"password":"HijackAttempt123"}' \
+        "${BASE_URL}/api/v1/users/${ADMIN_ID}/password")
+    if [ "$RBAC_SETPW" = "403" ]; then
+        log_success "Investor cannot set passwords (403)"
+    else
+        log_fail "RBAC: investor should get 403 on PUT /users/:id/password, got $RBAC_SETPW"
     fi
 fi
 

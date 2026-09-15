@@ -10,6 +10,7 @@ const (
 	AuditUserUpdated     = "user.updated"
 	AuditUserDeactivated = "user.deactivated"
 	AuditUserInvited     = "user.invited"
+	AuditUserPasswordSet = "user.password_set"
 
 	AuditDocumentUploaded   = "document.uploaded"
 	AuditDocumentViewed     = "document.viewed"

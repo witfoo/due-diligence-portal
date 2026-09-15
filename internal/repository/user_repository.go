@@ -17,6 +17,7 @@ type UserRepository interface {
 	List(ctx context.Context, limit, offset int) ([]*domain.User, int, error)
 	Update(ctx context.Context, user *domain.User) error
 	UpdateLastLogin(ctx context.Context, id string) error
+	UpdatePassword(ctx context.Context, id, passwordHash string) error
 	Deactivate(ctx context.Context, id string) error
 	Count(ctx context.Context) (int, error)
 
@@ -109,6 +110,26 @@ func (r *userRepository) UpdateLastLogin(ctx context.Context, id string) error {
 		`UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
 	if err != nil {
 		return fmt.Errorf("update last login (id=%s): %w", id, err)
+	}
+	return nil
+}
+
+// UpdatePassword replaces a user's stored bcrypt hash. It touches no other
+// column (role and active state are unchanged) and never includes the hash in
+// returned errors.
+func (r *userRepository) UpdatePassword(ctx context.Context, id, passwordHash string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`, passwordHash, now, id)
+	if err != nil {
+		return fmt.Errorf("update password (id=%s): %w", id, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update password rows affected (id=%s): %w", id, err)
+	}
+	if rows == 0 {
+		return domain.ErrUserNotFound
 	}
 	return nil
 }

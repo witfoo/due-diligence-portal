@@ -3,7 +3,9 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -22,6 +24,10 @@ const (
 	accessTokenExpiry  = 15 * time.Minute
 	refreshTokenExpiry = 7 * 24 * time.Hour
 	tokenIssuer        = "dd-portal"
+
+	// passwordVersionBytes is how many bytes of the HMAC-SHA256 password
+	// fingerprint are embedded (hex-encoded) in tokens.
+	passwordVersionBytes = 16
 
 	// TokenTypeAccess and TokenTypeRefresh distinguish the two token classes so a
 	// refresh token cannot be replayed as an access token (and vice-versa).
@@ -56,6 +62,12 @@ type JWTClaims struct {
 	Name      string `json:"name"`
 	Role      string `json:"role"`
 	TokenType string `json:"token_type"`
+
+	// PasswordVersion is a keyed fingerprint of the password hash the token was
+	// minted against (see passwordVersion). RefreshToken rejects refresh tokens
+	// whose fingerprint no longer matches, so changing a password revokes them
+	// without server-side session state.
+	PasswordVersion string `json:"pwv,omitempty"`
 }
 
 // AuthService handles authentication and token management.
@@ -102,14 +114,9 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Login
 		return nil, domain.ErrAccountDisabled
 	}
 
-	accessToken, err := s.generateToken(user, accessTokenExpiry, TokenTypeAccess)
+	result, err := s.issueTokens(user)
 	if err != nil {
-		return nil, fmt.Errorf("generate access token: %w", err)
-	}
-
-	refreshToken, err := s.generateToken(user, refreshTokenExpiry, TokenTypeRefresh)
-	if err != nil {
-		return nil, fmt.Errorf("generate refresh token: %w", err)
+		return nil, err
 	}
 
 	if err := s.userRepo.UpdateLastLogin(ctx, user.ID); err != nil {
@@ -117,11 +124,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Login
 		fmt.Printf("[WARN] Failed to update last login for %s: %v\n", user.ID, err)
 	}
 
-	return &LoginResult{
-		User:         user,
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-	}, nil
+	return result, nil
 }
 
 // Register creates a new user account using an invite token.
@@ -176,6 +179,15 @@ func (s *AuthService) Register(ctx context.Context, token, name, password string
 // RefreshToken generates a new access token from a valid refresh token.
 // It rejects access tokens (only a token minted as a refresh token is accepted),
 // preventing token-type confusion.
+//
+// The token's password-version claim must match the fingerprint of the user's
+// current password hash (constant-time comparison), so setting or changing a
+// password revokes every refresh token issued before the change. Refresh tokens
+// minted before the claim existed carry no fingerprint and are rejected (fail
+// closed), which costs their holders one re-login. Already-issued ACCESS tokens
+// are validated statelessly by middleware.JWTAuth and are not revoked: they stay
+// usable until they expire (at most accessTokenExpiry), the same window that
+// applies after an account is deactivated.
 func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (string, error) {
 	claims, err := s.ValidateToken(refreshToken)
 	if err != nil {
@@ -191,11 +203,82 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 		return "", domain.ErrUnauthorized
 	}
 
+	if !s.passwordVersionMatches(claims.PasswordVersion, user.PasswordHash) {
+		return "", domain.ErrUnauthorized
+	}
+
 	if !user.IsActive {
 		return "", domain.ErrAccountDisabled
 	}
 
 	return s.generateToken(user, accessTokenExpiry, TokenTypeAccess)
+}
+
+// SetPassword sets a user's password on an administrator's behalf, without the
+// old password. The account's role and active state are left unchanged, so a
+// disabled account can be given a password before it is re-enabled. Every
+// refresh token previously issued to the user stops working (see RefreshToken).
+func (s *AuthService) SetPassword(ctx context.Context, userID, password string) (*domain.User, error) {
+	if err := domain.ValidatePassword(password); err != nil {
+		return nil, err
+	}
+
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user for password set: %w", err)
+	}
+
+	if err := s.storePassword(ctx, user, password); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// ChangeOwnPassword changes the caller's own password after re-verifying the
+// current one. Because the change revokes the caller's existing refresh tokens,
+// it returns a freshly minted token pair bound to the new password so the
+// caller's session continues.
+//
+// Like SetPassword it leaves the account's active state alone and does not check
+// it: a disabled account can still change its password while its access token
+// lasts, but RefreshToken refuses disabled accounts, so the new refresh token
+// cannot extend that session.
+func (s *AuthService) ChangeOwnPassword(ctx context.Context, userID, currentPassword, newPassword string) (*LoginResult, error) {
+	if err := domain.ValidatePassword(newPassword); err != nil {
+		return nil, err
+	}
+	if currentPassword == "" {
+		return nil, domain.ErrCurrentPasswordRequired
+	}
+
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user for password change: %w", err)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return nil, domain.ErrCurrentPasswordIncorrect
+	}
+
+	if err := s.storePassword(ctx, user, newPassword); err != nil {
+		return nil, err
+	}
+	return s.issueTokens(user)
+}
+
+// storePassword hashes password, persists the hash, and updates user in place so
+// callers (and tokens minted from user) see the new hash.
+func (s *AuthService) storePassword(ctx context.Context, user *domain.User, password string) error {
+	hash, err := HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	if err := s.userRepo.UpdatePassword(ctx, user.ID, hash); err != nil {
+		return fmt.Errorf("store password: %w", err)
+	}
+	user.PasswordHash = hash
+	user.UpdatedAt = time.Now().UTC().Truncate(time.Second)
+	return nil
 }
 
 // ValidateToken parses and validates a JWT token. It enforces the HS256 algorithm,
@@ -313,6 +396,26 @@ func (s *AuthService) EnsureAdminExists(ctx context.Context, email, password str
 	return generated, nil
 }
 
+// issueTokens mints an access/refresh token pair for user. Both tokens carry the
+// fingerprint of user.PasswordHash, so user must hold the currently stored hash.
+func (s *AuthService) issueTokens(user *domain.User) (*LoginResult, error) {
+	accessToken, err := s.generateToken(user, accessTokenExpiry, TokenTypeAccess)
+	if err != nil {
+		return nil, fmt.Errorf("generate access token: %w", err)
+	}
+
+	refreshToken, err := s.generateToken(user, refreshTokenExpiry, TokenTypeRefresh)
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
+
+	return &LoginResult{
+		User:         user,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
 func (s *AuthService) generateToken(user *domain.User, expiry time.Duration, tokenType string) (string, error) {
 	now := time.Now()
 	claims := &JWTClaims{
@@ -321,15 +424,37 @@ func (s *AuthService) generateToken(user *domain.User, expiry time.Duration, tok
 			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    tokenIssuer,
 		},
-		UserID:    user.ID,
-		Email:     user.Email,
-		Name:      user.Name,
-		Role:      user.Role,
-		TokenType: tokenType,
+		UserID:          user.ID,
+		Email:           user.Email,
+		Name:            user.Name,
+		Role:            user.Role,
+		TokenType:       tokenType,
+		PasswordVersion: s.passwordVersion(user.PasswordHash),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.jwtSecret)
+}
+
+// passwordVersion returns a keyed, non-reversible fingerprint of a password hash:
+// the hex encoding of the first 16 bytes of HMAC-SHA256(jwtSecret, passwordHash).
+// Keying with the JWT secret keeps the readable token payload from revealing
+// anything about the hash. bcrypt salts are random, so every password set, even
+// to the same value, produces a new fingerprint.
+func (s *AuthService) passwordVersion(passwordHash string) string {
+	mac := hmac.New(sha256.New, s.jwtSecret)
+	mac.Write([]byte(passwordHash))
+	return hex.EncodeToString(mac.Sum(nil)[:passwordVersionBytes])
+}
+
+// passwordVersionMatches reports, in constant time, whether a token's
+// password-version claim matches the current password hash. A missing claim
+// never matches.
+func (s *AuthService) passwordVersionMatches(claim, passwordHash string) bool {
+	if claim == "" {
+		return false
+	}
+	return hmac.Equal([]byte(claim), []byte(s.passwordVersion(passwordHash)))
 }
 
 // HashPassword hashes a password using bcrypt.
